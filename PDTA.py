@@ -36,7 +36,7 @@ def _served_dests(T: nx.DiGraph, terminals: Set[str], G: nx.DiGraph):
         if n in terminals and G.nodes[n].get("type") == "dest"
     }
     
-def PDTA_Density(G: nx.DiGraph, Beta: float, terminals: Set[str]):
+def PDTA_Density(G: nx.DiGraph, Beta: float, terminals: Set[str], interval_len: int = 1):
     if G.number_of_edges() == 0:
         return INF
     local_terms = set(terminals)
@@ -51,7 +51,7 @@ def PDTA_Density(G: nx.DiGraph, Beta: float, terminals: Set[str]):
     if D_T == 0:
         return INF
     else:
-        return (total + Beta * D_T) / D_T
+        return (total + Beta * D_T / interval_len) / D_T
 
 def PDTA_Origin(level: int, r: str, m: int, terminals: Set[str], G: nx.DiGraph) -> nx.DiGraph:
     T_return = nx.DiGraph()
@@ -105,7 +105,7 @@ def PDTA_Origin(level: int, r: str, m: int, terminals: Set[str], G: nx.DiGraph) 
 
     return T_return
 
-def PDTA(level: int, r: str, m: int, terminals: Set[str], G: nx.DiGraph):
+def PDTA(level: int, r: str, m: int, terminals: Set[str], G: nx.DiGraph, interval_len: int = 1):
     T_return = nx.DiGraph()
     T_terminals = set(terminals)
     d_T_min_return = INF
@@ -151,7 +151,7 @@ def PDTA(level: int, r: str, m: int, terminals: Set[str], G: nx.DiGraph):
         if not D_min:
             return nx.DiGraph(), INF, {}
 
-        d_T_min_return = PDTA_Density(T_return, 1, T_terminals)
+        d_T_min_return = PDTA_Density(T_return, 1, T_terminals, interval_len)
         T_record[(d_T_min_return, len(D_min))] = T_return.copy()
 
         # Invariant: any non-empty PDTA result must contain root r.
@@ -179,11 +179,12 @@ def PDTA(level: int, r: str, m: int, terminals: Set[str], G: nx.DiGraph):
                 v,
                 min(len(T_terminals), m),
                 T_terminals,
-                G
+                G,
+                interval_len
             )
 
             candidate = _attach_parent_edge(r, v, child_tree, G)
-            d_tmp = PDTA_Density(candidate, 1, T_terminals)
+            d_tmp = PDTA_Density(candidate, 1, T_terminals, interval_len)
 
             D_tmp = _served_dests(candidate, T_terminals, G)
 
@@ -223,7 +224,7 @@ def PDTA(level: int, r: str, m: int, terminals: Set[str], G: nx.DiGraph):
                     continue
 
                 candidate = _attach_parent_edge(r, v, combo, G)
-                d_tmp = PDTA_Density(candidate, 1, T_terminals)
+                d_tmp = PDTA_Density(candidate, 1, T_terminals, interval_len)
 
                 D_tmp = _served_dests(candidate, T_terminals, G)
 

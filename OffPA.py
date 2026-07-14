@@ -30,7 +30,8 @@ def Setting_Starfront_Thd(G: nx.DiGraph, default_thd: float = 50.0):
 def STARFRONT_sequences(
     graphs: List[nx.DiGraph],
     caches: List[str],
-    Thd_Latency: Dict[str, float] | None = None
+    Thd_Latency: Dict[str, float] | None = None,
+    alpha: float = 1.0
 ):
     if not graphs:
         return []
@@ -40,11 +41,11 @@ def STARFRONT_sequences(
 
     res: List[nx.DiGraph] = []
     for i in range(len(graphs)):
-        res.append(STARFRONT(G=graphs[i], Thd_Latency=Thd_Latency, caches=caches))
+        res.append(STARFRONT(G=graphs[i], Thd_Latency=Thd_Latency, caches=caches, alpha=alpha))
     return res
 
 
-def STARFRONT(G: nx.DiGraph, Thd_Latency: Dict[str, float], caches: List[str]) -> nx.DiGraph:
+def STARFRONT(G: nx.DiGraph, Thd_Latency: Dict[str, float], caches: List[str], alpha: float = 1.0) -> nx.DiGraph:
     """
     Revised OffPA-style STARFRONT:
     - access cost: per-request full-path cost
@@ -136,7 +137,7 @@ def STARFRONT(G: nx.DiGraph, Thd_Latency: Dict[str, float], caches: List[str]) -
             total += path_cost(path, req_size)
         return total
 
-    def CT_storage(selected_caches: Set[str]) -> float:
+    def CT_storage(selected_caches: Set[str], alpha: float = 1.0) -> float:
         """
         Only selected cache servers incur storage cost.
         Relay satellites/clouds on paths do NOT.
@@ -154,17 +155,18 @@ def STARFRONT(G: nx.DiGraph, Thd_Latency: Dict[str, float], caches: List[str]) -
             if not is_cache_node(n):
                 continue
             attr = G.nodes[n]
-            total += Algorithm.cost_cache(attr, W_total)
+            total += Algorithm.cost_cache(attr, W_total, alpha=alpha)
         return total
 
     def CT(
         selected_caches: Set[str],
         distribution_paths: Dict[str, List[str]],
         assigned_req_paths: Dict[str, List[str]],
+        alpha: float = 1.0
     ) -> float:
         return (
             CT_dist_from_paths(distribution_paths)
-            + CT_storage(selected_caches)
+            + CT_storage(selected_caches, alpha=alpha)
             + CT_access_from_paths(assigned_req_paths)
         )
 
@@ -244,7 +246,7 @@ def STARFRONT(G: nx.DiGraph, Thd_Latency: Dict[str, float], caches: List[str]) -
         best_distribution_paths = None
         best_assigned_req_paths = None
 
-        current_CT = CT(selected_caches, distribution_paths, assigned_req_paths)
+        current_CT = CT(selected_caches, distribution_paths, assigned_req_paths, alpha=alpha)
 
         for j in valid_caches:
             if not candidate[j]:
@@ -274,7 +276,7 @@ def STARFRONT(G: nx.DiGraph, Thd_Latency: Dict[str, float], caches: List[str]) -
                     # if no source path exists, cannot use this cache
                     continue
 
-            new_CT = CT(tmp_selected_caches, tmp_distribution_paths, tmp_assigned_req_paths)
+            new_CT = CT(tmp_selected_caches, tmp_distribution_paths, tmp_assigned_req_paths, alpha=alpha)
             dCT = new_CT - current_CT
 
             if dCT <= 0:
@@ -316,8 +318,8 @@ def STARFRONT(G: nx.DiGraph, Thd_Latency: Dict[str, float], caches: List[str]) -
     DG.graph["assigned_req_paths"] = {k: list(v) for k, v in assigned_req_paths.items()}
     DG.graph["CT_dist"] = CT_dist_from_paths(distribution_paths)
     DG.graph["CT_access"] = CT_access_from_paths(assigned_req_paths)
-    DG.graph["CT_storage"] = CT_storage(selected_caches)
-    DG.graph["CT_total"] = CT(selected_caches, distribution_paths, assigned_req_paths)
+    DG.graph["CT_storage"] = CT_storage(selected_caches, alpha)
+    DG.graph["CT_total"] = CT(selected_caches, distribution_paths, assigned_req_paths, alpha=alpha)
 
     return DG
 # offpa

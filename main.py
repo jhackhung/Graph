@@ -98,10 +98,11 @@ def Execute_OffPA(
     graphs: list[nx.Graph],
     caches: list[str],
     time_slots: int,
+    alpha: float = 1.0
 ) -> dict[tuple[int, int], nx.DiGraph]:
     """Run OffPA / STARFRONT baseline once. This tree does not depend on beta."""
     start_time = time.time()
-    results = OffPA.STARFRONT_sequences(graphs, caches)
+    results = OffPA.STARFRONT_sequences(graphs, caches, alpha=alpha)
     T_i_t = {(0, i): results[i] for i in range(time_slots)}
 
     total_time = time.time() - start_time
@@ -117,6 +118,7 @@ def Execute_TSMTA(
     node_attr_map: dict,
     time_slots: int,
     pdta_level: int = 2,
+    alpha: float = 1.0
 ) -> tuple[dict[tuple[int, int], nx.DiGraph], dict, dict]:
     """
     Run TSMTA base once.
@@ -128,7 +130,7 @@ def Execute_TSMTA(
     start_time = time.time()
 
     caches = [n for n, d in graphs[0].nodes(data=True) if d.get("cache") is True]
-    TIG, CTIG, TIG_Edges_Map, CTIG_Edges_Map = TVM.TIG_CTIG(graphs, src_nodes, caches)
+    TIG, CTIG, TIG_Edges_Map, CTIG_Edges_Map = TVM.TIG_CTIG(graphs, src_nodes, caches, alpha=alpha)
 
     dests_set = {}
     for idx, _ in enumerate(src_nodes):
@@ -165,11 +167,12 @@ def Execute_TSMTA(
 # Utility functions
 # =========================================================
 
-def beta_to_tag(beta: float | int) -> str:
-    beta_f = float(beta)
-    if beta_f.is_integer():
-        return str(int(beta_f))
-    return str(beta_f).replace(".", "p")
+def float_to_tag(f: float | int) -> str:
+    ff = float(f)
+    if ff.is_integer():
+        return str(int(ff))
+    return str(ff).replace(".", "p")
+
 
 
 def copy_tree_sequence(
@@ -210,18 +213,21 @@ def get_graph_name(cfg: dict, sweep_x: str, num_runs: int) -> str:
     return f"graph_{graph_value}_avg{num_runs}"
 
 
-def make_empty_results(beta_values: list[float], algo_names: list[str]) -> dict:
+def make_empty_results(beta_values: list[float], alpha_values: list[float], algo_names: list[str]) -> dict:
     return {
-        beta_to_tag(beta): {
-            algo: {
-                "BC": [],
-                "CC": [],
-                "RC": [],
-                "Total": [],
-                "Build_Runtime_sec": [],
-                "Beta_Runtime_sec": [],
+        float_to_tag(beta): {
+            float_to_tag(alpha): {
+                algo: {
+                    "BC": [],
+                    "CC": [],
+                    "RC": [],
+                    "Total": [],
+                    "Build_Runtime_sec": [],
+                    "Beta_Runtime_sec": [],
+                }
+                for algo in algo_names
             }
-            for algo in algo_names
+            for alpha in alpha_values
         }
         for beta in beta_values
     }
@@ -230,6 +236,7 @@ def make_empty_results(beta_values: list[float], algo_names: list[str]) -> dict:
 def append_result(
     all_results: dict,
     beta: float,
+    alpha: float,
     algo: str,
     bc: float,
     cc: float,
@@ -238,18 +245,20 @@ def append_result(
     build_runtime_sec: float = 0.0,
     beta_runtime_sec: float = 0.0,
 ) -> None:
-    beta_tag = beta_to_tag(beta)
-    all_results[beta_tag][algo]["BC"].append(bc)
-    all_results[beta_tag][algo]["CC"].append(cc)
-    all_results[beta_tag][algo]["RC"].append(rc)
-    all_results[beta_tag][algo]["Total"].append(total)
-    all_results[beta_tag][algo]["Build_Runtime_sec"].append(build_runtime_sec)
-    all_results[beta_tag][algo]["Beta_Runtime_sec"].append(beta_runtime_sec)
+    beta_tag = float_to_tag(beta)
+    alpha_tag = float_to_tag(alpha)
+    all_results[beta_tag][alpha_tag][algo]["BC"].append(bc)
+    all_results[beta_tag][alpha_tag][algo]["CC"].append(cc)
+    all_results[beta_tag][alpha_tag][algo]["RC"].append(rc)
+    all_results[beta_tag][alpha_tag][algo]["Total"].append(total)
+    all_results[beta_tag][alpha_tag][algo]["Build_Runtime_sec"].append(build_runtime_sec)
+    all_results[beta_tag][alpha_tag][algo]["Beta_Runtime_sec"].append(beta_runtime_sec)
 
 
 def evaluate_fixed_tree_algorithms_for_beta(
     all_results: dict,
     beta: float,
+    alpha: float,
     T_DMTS: dict[tuple[int, int], nx.DiGraph],
     T_OffPA: dict[tuple[int, int], nx.DiGraph],
     T_SSSP: dict[tuple[int, int], nx.DiGraph],
@@ -265,8 +274,9 @@ def evaluate_fixed_tree_algorithms_for_beta(
         caches,
         time_slots,
         beta=beta,
+        alpha=alpha
     )
-    append_result(all_results, beta, "DMTS", bc, cc, rc, total)
+    append_result(all_results, beta, alpha, "DMTS", bc, cc, rc, total)
 
     bc, cc, rc, total = TVM.evaluate_algorithm(
         "OffPA",
@@ -275,8 +285,9 @@ def evaluate_fixed_tree_algorithms_for_beta(
         caches,
         time_slots,
         beta=beta,
+        alpha=alpha
     )
-    append_result(all_results, beta, "OffPA", bc, cc, rc, total)
+    append_result(all_results, beta, alpha, "OffPA", bc, cc, rc, total)
 
     bc, cc, rc, total = TVM.evaluate_algorithm(
         "SSSP",
@@ -285,13 +296,15 @@ def evaluate_fixed_tree_algorithms_for_beta(
         caches,
         time_slots,
         beta=beta,
+        alpha=alpha
     )
-    append_result(all_results, beta, "SSSP", bc, cc, rc, total)
+    append_result(all_results, beta, alpha, "SSSP", bc, cc, rc, total)
 
 
 def evaluate_tsmta_for_beta(
     all_results: dict,
     beta: float,
+    alpha: float,
     T_TSMTA_base: dict[tuple[int, int], nx.DiGraph],
     TIG: dict,
     TIG_Edges_Map: dict,
@@ -320,6 +333,7 @@ def evaluate_tsmta_for_beta(
         100,
         node_attr_map=node_attr_map,
         beta=beta,
+        alpha=alpha,
     )
 
     TVM.expand_virtual_edges(
@@ -338,6 +352,7 @@ def evaluate_tsmta_for_beta(
         caches,
         time_slots,
         beta=beta,
+        alpha=alpha
     )
 
     beta_runtime_sec = time.time() - beta_start_time
@@ -347,6 +362,7 @@ def evaluate_tsmta_for_beta(
     print(
         f"[RAW TSMTA] PDTA_k={pdta_level} "
         f"beta={beta} "
+        f"alpha={alpha} "
         f"sweep_n_sats={cfg['n_sats']} "
         f"sweep_n_dests={cfg['n_dests']} "
         f"seed={current_seed} "
@@ -358,6 +374,7 @@ def evaluate_tsmta_for_beta(
     append_result(
         all_results,
         beta,
+        alpha,
         "TSMTA",
         bc,
         cc,
@@ -371,6 +388,7 @@ def evaluate_tsmta_for_beta(
 def save_all_beta_results(
     all_results: dict,
     beta_values: list[float],
+    alpha_values: list[float],
     algo_names: list[str],
     cfg: dict,
     num_runs: int,
@@ -380,54 +398,58 @@ def save_all_beta_results(
     pdta_level = int(cfg.get("pdta_level", 2))
 
     for beta in beta_values:
-        beta_tag = beta_to_tag(beta)
-        excel_path = f"{sweep_x}_pdta{pdta_level}_beta_{beta_tag}.xlsx"
+        for alpha in alpha_values:
+            beta_tag = float_to_tag(beta)
+            alpha_tag = float_to_tag(alpha)
+            
+            excel_path = f"{sweep_x}_pdta{pdta_level}_beta_{beta_tag}_alpha_{alpha_tag}.xlsx"
 
-        print(f"\n=== Writing beta={beta} results to Excel: {excel_path} ===")
+            print(f"\n=== Writing beta={beta} alpha={alpha} results to Excel: {excel_path} ===")
 
-        for algo in algo_names:
-            vals_bc = all_results[beta_tag][algo]["BC"]
-            vals_cc = all_results[beta_tag][algo]["CC"]
-            vals_rc = all_results[beta_tag][algo]["RC"]
-            vals_total = all_results[beta_tag][algo]["Total"]
-            vals_build_runtime = all_results[beta_tag][algo]["Build_Runtime_sec"]
-            vals_beta_runtime = all_results[beta_tag][algo]["Beta_Runtime_sec"]
+            for algo in algo_names:
+                vals_bc = all_results[beta_tag][alpha_tag][algo]["BC"]
+                vals_cc = all_results[beta_tag][alpha_tag][algo]["CC"]
+                vals_rc = all_results[beta_tag][alpha_tag][algo]["RC"]
+                vals_total = all_results[beta_tag][alpha_tag][algo]["Total"]
+                vals_build_runtime = all_results[beta_tag][alpha_tag][algo]["Build_Runtime_sec"]
+                vals_beta_runtime = all_results[beta_tag][alpha_tag][algo]["Beta_Runtime_sec"]
 
-            mean_bc, std_bc = calc_mean_std(vals_bc, num_runs)
-            mean_cc, std_cc = calc_mean_std(vals_cc, num_runs)
-            mean_rc, std_rc = calc_mean_std(vals_rc, num_runs)
-            mean_total, std_total = calc_mean_std(vals_total, num_runs)
-            mean_build_runtime, std_build_runtime = calc_mean_std(vals_build_runtime, num_runs)
-            mean_beta_runtime, std_beta_runtime = calc_mean_std(vals_beta_runtime, num_runs)
+                mean_bc, std_bc = calc_mean_std(vals_bc, num_runs)
+                mean_cc, std_cc = calc_mean_std(vals_cc, num_runs)
+                mean_rc, std_rc = calc_mean_std(vals_rc, num_runs)
+                mean_total, std_total = calc_mean_std(vals_total, num_runs)
+                mean_build_runtime, std_build_runtime = calc_mean_std(vals_build_runtime, num_runs)
+                mean_beta_runtime, std_beta_runtime = calc_mean_std(vals_beta_runtime, num_runs)
 
-            row = {
-                "experiment_id": None,
-                "timestamp": datetime.now().isoformat(timespec="seconds"),
-                "graph": graph_name,
-                "algo": algo,
-                "BC": mean_bc,
-                "CC": mean_cc,
-                "RC": mean_rc,
-                "Total": mean_total,
-                "BC_Std": std_bc,
-                "CC_Std": std_cc,
-                "RC_Std": std_rc,
-                "Total_Std": std_total,
-                "Build_Runtime_sec": mean_build_runtime,
-                "Build_Runtime_Std": std_build_runtime,
-                "Beta_Runtime_sec": mean_beta_runtime,
-                "Beta_Runtime_Std": std_beta_runtime,
-                "beta": float(beta),
-                "PDTA_k": pdta_level,
-                "Total_Runtime_sec": mean_build_runtime + mean_beta_runtime,
-            }
+                row = {
+                    "experiment_id": None,
+                    "timestamp": datetime.now().isoformat(timespec="seconds"),
+                    "graph": graph_name,
+                    "algo": algo,
+                    "BC": mean_bc,
+                    "CC": mean_cc,
+                    "RC": mean_rc,
+                    "Total": mean_total,
+                    "BC_Std": std_bc,
+                    "CC_Std": std_cc,
+                    "RC_Std": std_rc,
+                    "Total_Std": std_total,
+                    "Build_Runtime_sec": mean_build_runtime,
+                    "Build_Runtime_Std": std_build_runtime,
+                    "Beta_Runtime_sec": mean_beta_runtime,
+                    "Beta_Runtime_Std": std_beta_runtime,
+                    "beta": float(beta),
+                    "alpha": float(alpha),
+                    "PDTA_k": pdta_level,
+                    "Total_Runtime_sec": mean_build_runtime + mean_beta_runtime,
+                }
 
-            save_result_to_excel(excel_path, row)
-            print(
-                f"Saved beta={beta} {algo}: "
-                f"BC={mean_bc:.2f}, CC={mean_cc:.2f}, "
-                f"RC={mean_rc:.2f}, Total={mean_total:.2f}"
-            )
+                save_result_to_excel(excel_path, row)
+                print(
+                    f"Saved beta={beta} alpha={alpha} {algo}: "
+                    f"BC={mean_bc:.2f}, CC={mean_cc:.2f}, "
+                    f"RC={mean_rc:.2f}, Total={mean_total:.2f}"
+                )
 
 
 # =========================================================
@@ -450,6 +472,7 @@ def main() -> None:
     # "sweep_x": "sats" or "dests"
     # "num_runs": 1
     # "base_seed": 42
+    alpha_values = [float(x) for x in cfg.get("alpha_values", [1, 10, 50, 100])]
     beta_values = [float(x) for x in cfg.get("beta_values", [1, 10, 50, 100])]
     pdta_level = int(cfg.get("pdta_level", 2))
     sweep_x = sys.argv[2] if len(sys.argv) >= 3 else cfg.get("sweep_x", "sats")
@@ -460,10 +483,11 @@ def main() -> None:
         raise ValueError("sweep_x must be either 'sats' or 'dests'.")
 
     algo_names = ["DMTS", "OffPA", "SSSP", "TSMTA"]
-    all_results = make_empty_results(beta_values, algo_names)
+    all_results = make_empty_results(beta_values, alpha_values, algo_names)
 
     print(f"📌 sweep_x = {sweep_x}")
     print(f"📌 beta_values = {beta_values}")
+    print(f"📌 alpha_values = {alpha_values}")
     print(f"📌 num_runs = {num_runs}")
     print(f"📌 base_seed = {base_seed}")
     print("核心流程：建樹每個 run 只跑一次；DMTS/OffPA/SSSP 只重算 evaluate；TSMTA 對 copy 跑 Optimal(beta)。")
@@ -517,60 +541,66 @@ def main() -> None:
         print("\n--- Build DMTS once ---")
         T_DMTS = Execute_DMTS(graphs, time_slots)
 
-        print("\n--- Build OffPA once ---")
-        T_OffPA = Execute_OffPA(graphs, caches, time_slots)
-
         print("\n--- Build SSSP once ---")
         T_SSSP = Execute_SSSP_Union(graphs, time_slots, src_nodes, dest_nodes)
-
-        print("\n--- Build TSMTA base once ---")
-        T_TSMTA_base, TIG, TIG_Edges_Map, tsmta_build_runtime_sec = Execute_TSMTA(
-            graphs,
-            src_nodes,
-            caches,
-            dest_nodes,
-            node_attr_map,
-            time_slots,
-            pdta_level=pdta_level,
-        )
 
         # ==================================================
         # beta loop
         # ==================================================
-        for beta in beta_values:
-            print("\n" + "-" * 60)
-            print(f"📌 Evaluate beta = {beta}")
-            print("-" * 60)
+        for alpha in alpha_values:
+            print("\n--- Build OffPA once ---")
+            T_OffPA = Execute_OffPA(graphs, caches, time_slots, alpha=alpha)
 
-            evaluate_fixed_tree_algorithms_for_beta(
-                all_results=all_results,
-                beta=beta,
-                T_DMTS=T_DMTS,
-                T_OffPA=T_OffPA,
-                T_SSSP=T_SSSP,
-                src_nodes=src_nodes,
-                caches=caches,
-                time_slots=time_slots,
+            print("\n--- Build TSMTA base once ---")
+            T_TSMTA_base, TIG, TIG_Edges_Map, tsmta_build_runtime_sec = Execute_TSMTA(
+                graphs,
+                src_nodes,
+                caches,
+                dest_nodes,
+                node_attr_map,
+                time_slots,
+                pdta_level=pdta_level,
+                alpha=alpha,
             )
-
-            evaluate_tsmta_for_beta(
-                all_results=all_results,
-                beta=beta,
-                T_TSMTA_base=T_TSMTA_base,
-                TIG=TIG,
-                TIG_Edges_Map=TIG_Edges_Map,
-                src_nodes=src_nodes,
-                caches=caches,
-                node_attr_map=node_attr_map,
-                time_slots=time_slots,
-                cfg=cfg,
-                current_seed=current_seed,
-                tsmta_build_runtime_sec=tsmta_build_runtime_sec,
-            )
+        
+            for beta in beta_values:
+                print("\n" + "-" * 60)
+                print(f"📌 Evaluate beta = {beta}")
+                print(f"\n📌 Evaluate alpha = {alpha} ---")
+                print("-" * 60)
+  
+                evaluate_fixed_tree_algorithms_for_beta(
+                    all_results=all_results,
+                    beta=beta,
+                    alpha=alpha,
+                    T_DMTS=T_DMTS,
+                    T_OffPA=T_OffPA,
+                    T_SSSP=T_SSSP,
+                    src_nodes=src_nodes,
+                    caches=caches,
+                    time_slots=time_slots,
+                )
+                
+                evaluate_tsmta_for_beta(
+                    all_results=all_results,
+                    beta=beta,
+                    alpha=alpha,
+                    T_TSMTA_base=T_TSMTA_base,
+                    TIG=TIG,
+                    TIG_Edges_Map=TIG_Edges_Map,
+                    src_nodes=src_nodes,
+                    caches=caches,
+                    node_attr_map=node_attr_map,
+                    time_slots=time_slots,
+                    cfg=cfg,
+                    current_seed=current_seed,
+                    tsmta_build_runtime_sec=tsmta_build_runtime_sec,
+                )
 
     save_all_beta_results(
         all_results=all_results,
         beta_values=beta_values,
+        alpha_values=alpha_values,
         algo_names=algo_names,
         cfg=cfg,
         num_runs=num_runs,

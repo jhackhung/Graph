@@ -30,7 +30,7 @@ INF = float("inf")
 class TVM(Enum):
     WEIGHT = "cost_traffic"
     USER = "dest"
-def TIG_CTIG(G_sequence: list[nx.DiGraph], srcs: list[str], caches: list[str]):
+def TIG_CTIG(G_sequence: list[nx.DiGraph], srcs: list[str], caches: list[str], alpha: float = 1.0):
     T = len(G_sequence)
     E_sets = [set(G.edges()) for G in G_sequence]
     TIG_Interval: dict[tuple[int, int, int], nx.DiGraph] = {}
@@ -72,16 +72,16 @@ def TIG_CTIG(G_sequence: list[nx.DiGraph], srcs: list[str], caches: list[str]):
                 TIG_i_j.add_nodes_from((n, dict(attrs)) for n, attrs in G_j.nodes(data=True))
                 for (u, v) in sorted(current_edges, key=lambda e: (str(e[0]), str(e[1]))):
                     attrs = dict(base_attrs[(u, v)])
-                    attrs[TVM.WEIGHT.value] = sum_cost[(u, v)] / (j - i + 1)
                     attrs["BC"] = sum_cost[(u, v)] / (j - i + 1)
                     if v in caches:
                         attrs["CC"] = Algorithm.cost_cache(
                             G_sequence[j].nodes[v],
                             G_sequence[j].nodes[si]["data_size"],
-                            alpha=1
+                            alpha=alpha
                         )
                     else:
                         attrs["CC"] = 0
+                    attrs[TVM.WEIGHT.value] = attrs["BC"] + attrs["CC"]
                     TIG_i_j.add_edge(u, v, **attrs)
                 TIG_Interval[(idx, i, j)] = TIG_i_j
                 K = nx.DiGraph()
@@ -186,7 +186,7 @@ def TSMTA(
                         time_cache += time.time() - t0
                     else:
                         pdta_calls += 1
-                        tmp_k, tmp_min, records = PDTA.PDTA(pdta_level, si, dcount, local_dests, G)
+                        tmp_k, tmp_min, records = PDTA.PDTA(pdta_level, si, dcount, local_dests, G, interval_len=j - i + 1)
                         time_pdta += time.time() - t0
                         PDTA_cache[cache_key] = (tmp_k, tmp_min, records)
                     if tmp_min < T_Density_min:
@@ -229,7 +229,7 @@ def TSMTA(
                                 tmp_k = Algorithm.union_graphs(tmp_k, G_sub)
                                 tmp_k_cnt += key[1]
                                 ptr += 1
-                            tmp_min = PDTA.PDTA_Density(tmp_k, 1, local_dests) 
+                            tmp_min = PDTA.PDTA_Density(tmp_k, 1, local_dests, interval_len=j - i + 1)
                             Choosing_cache[cache_key] = (tmp_k, tmp_min)
                             if tmp_min < T_Density_min:
                                 if tmp_k.number_of_edges() > 0 and si not in tmp_k:
@@ -476,6 +476,7 @@ def RC_offpa_from_graph_diff(T_i_t: dict[tuple[int, int], nx.DiGraph],
 
 def evaluate_offpa(T_i_t: dict[tuple[int, int], nx.DiGraph],
                    beta: float = 10.0,
+                   alpha: float = 1.0,
                    output: bool = True):
     """
     Hard-split OffPA into BC / RC / CC for presentation consistency.
@@ -527,7 +528,7 @@ def evaluate_algorithm(name: str,
                        output: bool = True):
 
     if name == "OffPA":
-        return evaluate_offpa(result, beta=beta, output=output)
+        return evaluate_offpa(result, beta=beta, alpha=alpha, output=output)
 
     if not isinstance(result, dict):
         raise TypeError(f"For {name}, result must be T_i_t: dict[(idx,t)] -> nx.DiGraph.")
@@ -552,6 +553,7 @@ def Optimal(
     candidates_amount: int,
     node_attr_map=None,
     beta: float = 100.0,
+    alpha: float = 1.0
 ):
     print("Start Optimal")
 
@@ -659,6 +661,7 @@ def Optimal(
                 caches,
                 total_time,
                 beta=beta,
+                alpha=alpha,
                 output=False,
             )
 
@@ -705,6 +708,7 @@ def Optimal(
                         caches,
                         total_time,
                         beta=beta,
+                        alpha=alpha,
                         output=False,
                     )
 

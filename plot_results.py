@@ -4,8 +4,11 @@ import os
 import re
 import argparse
 import pandas as pd
+import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
+
+matplotlib.use("Agg")  # Use non-interactive backend for PNG/PDF output
 
 # Existing modes:
 #   python plot_results_beta.py results_ns300_nc20_nd50_p72_t10_avg_std.xlsx --x sats --break-ratio 1
@@ -96,8 +99,14 @@ def get_x_config(x_type):
             "x_col": "beta_pos",
             "x_label": "Beta (β)"
         }
+    
+    if x_type == "alpha":
+        return {
+            "x_col": "alpha_pos",
+            "x_label": "Alpha (α)"
+        }
 
-    raise ValueError("x_type must be 'sats', 'dests', or 'beta'.")
+    raise ValueError("x_type must be 'sats', 'dests', 'beta', or 'alpha'.")
 
 
 def format_number_label(value):
@@ -121,6 +130,29 @@ def extract_beta_from_path(path):
     if not match:
         raise ValueError(f"Cannot extract beta from filename: {basename}")
     return float(match.group(1))
+
+def extract_alpha_from_path(path):
+    """
+    Extract alpha value from names like:
+        sats_alpha_1.xlsx, dests_alpha_10.xlsx, xxx_alpha_50_avg.xlsx
+    目前假設傳入資料為固定 beta 的 excel 檔案，並且檔名中包含 alpha_ 數值
+    """
+    basename = os.path.basename(path)
+    match = re.search(r"alpha_([0-9]+(?:\.[0-9]+)?)", basename)
+    if not match:
+        raise ValueError(f"Cannot extract alpha from filename: {basename}")
+    return float(match.group(1))
+
+def extract_pdta_from_path(path):
+    """
+    Extract pdta level from names like:
+        sats_pdta3_beta_100_alpha_1.xlsx
+    """
+    basename = os.path.basename(path)
+    match = re.search(r"pdta(\d+)", basename)
+    if not match:
+        raise ValueError(f"Cannot extract pdta level from filename: {basename}")
+    return int(match.group(1))
 
 
 def infer_fixed_type_from_paths(paths):
@@ -199,6 +231,53 @@ def load_beta_excels(excel_paths, fixed_type, fixed_value):
 
     return merged, x_ticks, x_tick_labels
 
+def load_alpha_excels(excel_paths, fixed_type, fixed_value):
+    """
+    New alpha mode:
+      - Read multiple alpha files.
+      - Extract alpha from filename.
+      - Extract graph number from graph column.
+      - Keep only rows where graph number == fixed_value.
+      - Map alpha values to equally spaced categorical x positions.
+    """
+    fixed_col = "sat_num" if fixed_type == "sats" else "dest_num"
+    frames = []
+
+    for path in excel_paths:
+        if not os.path.exists(path):
+            raise FileNotFoundError(path)
+
+        alpha = extract_alpha_from_path(path)
+        df = pd.read_excel(path)
+        df = parse_graph_num(df, fixed_col)
+        df["alpha"] = alpha
+        df["source_file"] = os.path.basename(path)
+
+        df_fixed = df[df[fixed_col] == fixed_value].copy()
+        if df_fixed.empty:
+            print(f"⚠ Warning: {os.path.basename(path)} has no {fixed_col} == {fixed_value}")
+            continue
+
+        frames.append(df_fixed)
+
+    if not frames:
+        raise ValueError(
+            f"No rows found after filtering fixed {fixed_type} value = {fixed_value}."
+        )
+
+    merged = pd.concat(frames, ignore_index=True)
+    alpha_values = sorted(merged["alpha"].unique())
+    alpha_to_pos = {alpha: idx for idx, alpha in enumerate(alpha_values)}
+
+    merged["alpha_pos"] = merged["alpha"].map(alpha_to_pos)
+
+    x_ticks = [alpha_to_pos[alpha] for alpha in alpha_values]
+    x_tick_labels = [format_number_label(alpha) for alpha in alpha_values]
+
+    print(f"📌 Fixed {fixed_type}: {fixed_value}")
+    print(f"📌 Alpha values: {x_tick_labels}")
+
+    return merged, x_ticks, x_tick_labels
 
 def collect_plot_data(df, metric, x_col, selected_points):
     low_algos = ["DMTS", "TSMTA", "SSSP"]
@@ -550,7 +629,7 @@ def plot_metric_auto(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Plot simulation results with automatic broken y-axis, including beta sweep mode."
+        description="Plot simulation results with automatic broken y-axis, including beta and alpha sweep modes."
     )
 
     parser.add_argument(
@@ -561,9 +640,9 @@ def main():
 
     parser.add_argument(
         "--x",
-        choices=["sats", "dests", "beta"],
+        choices=["sats", "dests", "beta", "alpha"],
         required=True,
-        help="Choose x-axis type: sats, dests, or beta."
+        help="Choose x-axis type: sats, dests, beta, or alpha."
     )
 
     parser.add_argument(
@@ -640,10 +719,40 @@ def main():
             fixed_type=fixed_type,
             fixed_value=args.fixed
         )
+        
+        pdta_levels_in_files = {extract_pdta_from_path(p) for p in args.excel_paths}
+        if len(pdta_levels_in_files) > 1:
+            raise ValueError(f"Mixed PDTA levels in input files: {pdta_levels_in_files}. Use only one pdta level per plot.")
+        pdta_level = pdta_levels_in_files.pop()
 
-        base_name = f"beta_{fixed_type}_fixed_{args.fixed}"
+        base_name = f"beta_{fixed_type}_pdta{pdta_level}_fixed_{args.fixed}"
+        base_dir = f"img_1/{base_name}"
+
+    elif args.x == "alpha":
+        if args.fixed is None:
+            print("❌ --fixed is required when --x alpha")
+            sys.exit(1)
+        fixed_type = args.fixed_type or infer_fixed_type_from_paths(args.excel_paths)
+        if fixed_type is None:
+            print("❌ Cannot infer --fixed-type. Please provide --fixed-type sats or --fixed-type dests.")
+            sys.exit(1)
+
+        print(f"📘 Loading alpha Excel files: {', '.join(os.path.basename(p) for p in args.excel_paths)}")
+        df, x_ticks, x_tick_labels = load_alpha_excels(
+            excel_paths=args.excel_paths,
+            fixed_type=fixed_type,
+            fixed_value=args.fixed
+        )
+        
+        beta = extract_beta_from_path(args.excel_paths[0])
+        pdta_levels_in_files = {extract_pdta_from_path(p) for p in args.excel_paths}
+        if len(pdta_levels_in_files) > 1:
+            raise ValueError(f"Mixed PDTA levels in input files: {pdta_levels_in_files}. Use only one pdta level per plot.")
+        pdta_level = pdta_levels_in_files.pop()
+        
+        base_name = f"alpha_{fixed_type}_pdta{pdta_level}_fixed_{args.fixed}_beta_{format_number_label(beta)}"
         base_dir = f"img/{base_name}"
-
+    
     else:
         if len(args.excel_paths) != 1:
             print("❌ Original sats/dests mode accepts exactly one Excel file. Use --x beta for multiple files.")
