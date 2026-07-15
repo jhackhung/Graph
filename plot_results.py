@@ -726,7 +726,7 @@ def main():
         pdta_level = pdta_levels_in_files.pop()
 
         base_name = f"beta_{fixed_type}_pdta{pdta_level}_fixed_{args.fixed}"
-        base_dir = f"img_1/{base_name}"
+        base_dir = f"img/{base_name}"
 
     elif args.x == "alpha":
         if args.fixed is None:

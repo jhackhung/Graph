@@ -153,8 +153,9 @@ def TSMTA(
     def mem_mb():
         return p.memory_info().rss / 1024 / 1024
     T_i_t: dict[tuple[int, int], nx.DiGraph] = {}
-    PDTA_cache = LRUCache(capacity=10)      
-    Choosing_cache = LRUCache(capacity=10)
+    PDTA_cache = LRUCache(capacity=4096)
+    Choosing_cache = LRUCache(capacity=4096)
+    pdta_memo: dict = {}
     pdta_calls = 0
     cache_hits = 0
     time_pdta = 0.0
@@ -186,7 +187,7 @@ def TSMTA(
                         time_cache += time.time() - t0
                     else:
                         pdta_calls += 1
-                        tmp_k, tmp_min, records = PDTA.PDTA(pdta_level, si, dcount, local_dests, G, interval_len=j - i + 1)
+                        tmp_k, tmp_min, records = PDTA.PDTA(pdta_level, si, dcount, local_dests, G, interval_len=j - i + 1, _memo=pdta_memo)
                         time_pdta += time.time() - t0
                         PDTA_cache[cache_key] = (tmp_k, tmp_min, records)
                     if tmp_min < T_Density_min:
@@ -282,6 +283,12 @@ def TSMTA(
                     if CTIG_Interval[(i_best, i, j)].has_edge(u, v):
                         CTIG_Interval[(i_best, i, j)][u][v][TVM.WEIGHT.value] = 0.0
     print(f"[{i}] RSS = {mem_mb():.2f} MB")
+    print(
+        f"[PDTA memo] hits={PDTA.memo_stats['hits']}, "
+        f"misses={PDTA.memo_stats['misses']}, "
+        f"memo_size={len(pdta_memo)}, "
+        f"outer_cache_hits={cache_hits}, outer_pdta_calls={pdta_calls}"
+    )
     time.sleep(0.5)
     return T_i_t
 

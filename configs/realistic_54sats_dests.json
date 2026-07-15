@@ -1,6 +1,6 @@
 {
     "start_sats": 300,
-    "start_dests": 50,
+    "start_dests": 100,
     "seed_offset": 1,
     "n_sats": 300,
     "n_clouds": 20,
@@ -14,7 +14,8 @@
     "base_angular_velocity": 0.2,
     "thr_cloud_to_cloud": 3200.0,
     "region_dist_thr": 1000.0,
-    "beta_values": [1, 10, 50, 100],
+    "beta_values": [1],
+    "alpha_values": [1, 10, 50, 100],
     "pdta_levels": [3],
     "sweep_x": "dests",
     "num_runs": 1,

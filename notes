@@ -1,0 +1,78 @@
+# main 分支實驗
+
+## dests
+- dests 10 times iteration, sats fixed at 300, beta fixed at 100
+- also experiment at beta [1, 10, 50, 100]
+- pdta 1 2 3
+
+./run.sh dests 10 configs/realistic_54sats_dests.json
+
+> img_main_dests
+./plot.sh --x dests --file dests_pdta1_beta_100.xlsx --break-ratio 5
+./plot.sh --x dests --file dests_pdta2_beta_100.xlsx --break-ratio 5
+./plot.sh --x dests --file dests_pdta3_beta_100.xlsx --break-ratio 5
+
+
+## beta
+- beta [1, 10, 50, 100], sats fixed at 300 (already set in config), dests fixed at 100
+
+> img_main_beta
+./plot.sh --x beta --fixed-type dests --fixed 100 --pdta 1 --break-ratio 5
+./plot.sh --x beta --fixed-type dests --fixed 100 --pdta 2 --break-ratio 5
+./plot.sh --x beta --fixed-type dests --fixed 100 --pdta 3 --break-ratio 5
+
+
+## sats
+- sats 10 times iteration, dests fixed at 100, beta fixed at 100
+
+./run.sh sats 10 configs/realistic_54sats.json
+
+> img_main_sats
+./plot.sh --x sats --file sats_pdta1_beta_100.xlsx --break-ratio 5
+./plot.sh --x sats --file sats_pdta2_beta_100.xlsx --break-ratio 5
+./plot.sh --x sats --file sats_pdta3_beta_100.xlsx --break-ratio 5
+
+# alpha 分支實驗
+
+## dests
+- dests 10 times iteration, sats fixed at 300
+- also experiment at beta and alpha [1, 10, 50, 100]
+- pdta 1 2 3
+
+./run.sh dests 10 configs/realistic_54sats_dests.json
+
+> 可跟 main 分支 dests 圖比較
+> img_alpha_dests
+./plot.sh --x dests --file dests_pdta1_beta_100_alpha_1.xlsx --break-ratio 5
+./plot.sh --x dests --file dests_pdta2_beta_100_alpha_1.xlsx --break-ratio 5
+./plot.sh --x dests --file dests_pdta3_beta_100_alpha_1.xlsx --break-ratio 5
+
+
+## beta
+- beta [1, 10, 50, 100], sats fixed at 300 (already set in config), dests fixed at 100
+
+> 可跟 main 分支 beta 圖比較
+> img_alpha_beta
+./plot.sh --x beta --fixed-type dests --fixed 100 --alpha 1 --pdta 1 --break-ratio 5
+./plot.sh --x beta --fixed-type dests --fixed 100 --alpha 1 --pdta 2 --break-ratio 5
+./plot.sh --x beta --fixed-type dests --fixed 100 --alpha 1 --pdta 3 --break-ratio 5
+
+## sats
+- sats 10 times iteration, dests fixed at 100
+
+./run.sh sats 10 configs/realistic_54sats.json
+
+> 可跟 main 分支 sats 圖比較
+> img_alpha_sats
+./plot.sh --x sats --file sats_pdta1_beta_100_alpha_1.xlsx --break-ratio 5
+./plot.sh --x sats --file sats_pdta2_beta_100_alpha_1.xlsx --break-ratio 5
+./plot.sh --x sats --file sats_pdta3_beta_100_alpha_1.xlsx --break-ratio 5
+
+
+## alpha 
+- alpha [1, 10, 50, 100], sats fixed at 300 (already set in config), dests fixed at 100
+
+> img_alpha_alpha
+./plot.sh --x alpha --fixed-type dests --fixed 100 --beta 1 --pdta 1 --break-ratio 5
+./plot.sh --x alpha --fixed-type dests --fixed 100 --beta 1 --pdta 2 --break-ratio 5
+./plot.sh --x alpha --fixed-type dests --fixed 100 --beta 1 --pdta 3 --break-ratio 5
