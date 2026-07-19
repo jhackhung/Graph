@@ -318,7 +318,7 @@ def STARFRONT(G: nx.DiGraph, Thd_Latency: Dict[str, float], caches: List[str], a
     DG.graph["assigned_req_paths"] = {k: list(v) for k, v in assigned_req_paths.items()}
     DG.graph["CT_dist"] = CT_dist_from_paths(distribution_paths)
     DG.graph["CT_access"] = CT_access_from_paths(assigned_req_paths)
-    DG.graph["CT_storage"] = CT_storage(selected_caches, alpha)
+    DG.graph["CT_storage"] = CT_storage(selected_caches, alpha=1.0)
     DG.graph["CT_total"] = CT(selected_caches, distribution_paths, assigned_req_paths, alpha=alpha)
 
     return DG

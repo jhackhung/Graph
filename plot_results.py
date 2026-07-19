@@ -697,6 +697,7 @@ def main():
     x_config = get_x_config(args.x)
     x_col = x_config["x_col"]
     x_label = x_config["x_label"]
+    base_dir = "img1/"
 
     print(f"📌 X-axis mode: {args.x}")
     print(f"📌 X-axis label: {x_label}")
@@ -726,7 +727,8 @@ def main():
         pdta_level = pdta_levels_in_files.pop()
 
         base_name = f"beta_{fixed_type}_pdta{pdta_level}_fixed_{args.fixed}"
-        base_dir = f"img/{base_name}"
+        # base_dir = f"img/{base_name}"
+        base_dir += f"{base_name}"
 
     elif args.x == "alpha":
         if args.fixed is None:
@@ -751,7 +753,8 @@ def main():
         pdta_level = pdta_levels_in_files.pop()
         
         base_name = f"alpha_{fixed_type}_pdta{pdta_level}_fixed_{args.fixed}_beta_{format_number_label(beta)}"
-        base_dir = f"img/{base_name}"
+        # base_dir = f"img/{base_name}"
+        base_dir += f"{base_name}"
     
     else:
         if len(args.excel_paths) != 1:
@@ -767,7 +770,8 @@ def main():
         x_tick_labels = [str(v) for v in x_ticks]
 
         excel_name = os.path.splitext(os.path.basename(excel_path))[0]
-        base_dir = f"img/{excel_name}_{args.x}"
+        # base_dir = f"img/{excel_name}_{args.x}"
+        base_dir += f"{excel_name}_{args.x}"
 
     os.makedirs(base_dir, exist_ok=True)
 

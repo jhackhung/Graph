@@ -37,6 +37,7 @@ readarray -t PDTA_LEVELS < <(jq -r '.pdta_levels // [.pdta_level // 2] | .[]' "$
 # config 寫法：
 # "beta_values": [1, 10, 50, 100]
 BETA_VALUES=$(jq -c '.beta_values // [1,10,50,100]' "$CONFIG")
+BASE_SEED=$(jq -r '.base_seed // 42' "$CONFIG")
 
 # 是否清掉舊結果，仍然先放 bash 控制
 # 重新跑完整實驗建議 KEEP=0
@@ -48,6 +49,7 @@ echo "N=$N"
 echo "CONFIG=$CONFIG"
 echo "PDTA_LEVELS=${PDTA_LEVELS[*]}"
 echo "BETA_VALUES=$BETA_VALUES"
+echo "BASE_SEED=$BASE_SEED"
 
 # =========================================================
 # 清除舊結果
@@ -84,7 +86,7 @@ run_sats() {
 
         jq \
           --argjson nsats "$NSATS" \
-          --argjson seed "$i" \
+          --argjson seed "$BASE_SEED" \
           --argjson pdta_k "$PDTA_K" \
           --argjson beta_values "$BETA_VALUES" \
           '.n_sats=$nsats
@@ -122,7 +124,7 @@ run_dests() {
 
         jq \
           --argjson ndests "$NDESTS" \
-          --argjson seed "$i" \
+          --argjson seed "$BASE_SEED" \
           --argjson pdta_k "$PDTA_K" \
           --argjson beta_values "$BETA_VALUES" \
           '.n_dests=$ndests

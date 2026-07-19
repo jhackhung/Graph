@@ -155,7 +155,7 @@ def TSMTA(
     T_i_t: dict[tuple[int, int], nx.DiGraph] = {}
     PDTA_cache = LRUCache(capacity=4096)
     Choosing_cache = LRUCache(capacity=4096)
-    pdta_memo: dict = {}
+    pdta_memo: dict = {} if pdta_level >=3 else None
     pdta_calls = 0
     cache_hits = 0
     time_pdta = 0.0
@@ -187,7 +187,7 @@ def TSMTA(
                         time_cache += time.time() - t0
                     else:
                         pdta_calls += 1
-                        tmp_k, tmp_min, records = PDTA.PDTA(pdta_level, si, dcount, local_dests, G, interval_len=j - i + 1, _memo=pdta_memo)
+                        tmp_k, tmp_min, records = PDTA.PDTA(pdta_level, si, dcount, local_dests, G, interval_len=j - i + 1, _memo=pdta_memo, _sig=sig)
                         time_pdta += time.time() - t0
                         PDTA_cache[cache_key] = (tmp_k, tmp_min, records)
                     if tmp_min < T_Density_min:
@@ -374,6 +374,40 @@ def CC_multicast(T_i_t: dict[tuple[int, int], nx.DiGraph],
 
     return total_cost
 
+# debug
+def CC_multicast_per_time(T_i_t: dict[tuple[int, int], nx.DiGraph],
+                          src_nodes: list[str],
+                          caches: list[str],
+                          total_time: int,
+                          alpha: float = 1.0) -> tuple[list[float], list[int]]:
+    """
+    Per-time-slot breakdown of CC_multicast.
+
+    Returns:
+        cc_per_t: cc_per_t[t] = total cache cost at time slot t (summed over src_nodes)
+        cache_usage_per_t: cache_usage_per_t[t] = number of cache nodes present in the
+                           tree(s) at time slot t (summed over src_nodes)
+    """
+    cc_per_t = [0.0] * total_time
+    cache_usage_per_t = [0] * total_time
+
+    for idx, si in enumerate(src_nodes):
+        for t in range(total_time):
+            G = T_i_t.get((idx, t))
+            if G is None or si not in G.nodes:
+                continue
+
+            size = float(G.nodes[si].get("data_size", 0.0))
+
+            for c in caches:
+                if c not in G.nodes:
+                    continue
+                node_attr = G.nodes[c]
+                cc_per_t[t] += Algorithm.cost_cache(node_attr, size, alpha)
+                cache_usage_per_t[t] += 1
+
+    return cc_per_t, cache_usage_per_t
+
 
 def RC_multicast(T_i_t, src_nodes, total_time, beta=1.0):
     """
@@ -423,7 +457,8 @@ def evaluate_multicast_algorithm(name: str,
             total_time,
             cache_hit_factor=0.3
         )
-        cc = CC_multicast(T_i_t, src_nodes, caches, total_time, alpha)
+        # CC 存原始值（不乘 alpha），alpha 只在 Total 加總時套用
+        cc = CC_multicast(T_i_t, src_nodes, caches, total_time, alpha=1.0)
 
     elif name in ("DMTS", "SSSP"):
         bc = BC_multicast(T_i_t, src_nodes, total_time)
@@ -431,10 +466,10 @@ def evaluate_multicast_algorithm(name: str,
 
     else:
         bc = BC_multicast(T_i_t, src_nodes, total_time)
-        cc = CC_multicast(T_i_t, src_nodes, caches, total_time, alpha)
+        cc = CC_multicast(T_i_t, src_nodes, caches, total_time, alpha=1.0)
 
     rc = RC_multicast(T_i_t, src_nodes, total_time, beta)
-    total = bc + cc + rc
+    total = bc + alpha * cc + rc
     
     if output:
         print(f"[{name}] BC={bc:.2f}, CC={cc:.2f}, RC={rc:.2f}, Total={total:.2f}")
@@ -509,9 +544,9 @@ def evaluate_offpa(T_i_t: dict[tuple[int, int], nx.DiGraph],
         ct_storage += float(DG.graph.get("CT_storage", 0.0))
 
     bc = ct_dist + ct_access
-    cc = ct_storage
+    cc = ct_storage  # 原始 storage cost（不含 alpha），見 OffPA.py 的 CT_storage 儲存處
     rc = RC_offpa_from_graph_diff(T_i_t, beta=beta)
-    total = bc + cc + rc
+    total = bc + alpha * cc + rc
 
     if output:
         print(f"[OffPA] BC={bc:.2f}, CC={cc:.2f}, RC={rc:.2f}, Total={total:.2f}")

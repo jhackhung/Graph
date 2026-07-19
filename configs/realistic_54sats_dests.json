@@ -1,6 +1,6 @@
 {
     "start_sats": 300,
-    "start_dests": 100,
+    "start_dests": 50,
     "seed_offset": 1,
     "n_sats": 300,
     "n_clouds": 20,
@@ -16,7 +16,7 @@
     "region_dist_thr": 1000.0,
     "beta_values": [1],
     "alpha_values": [1, 10, 50, 100],
-    "pdta_levels": [3],
+    "pdta_levels": [2],
     "sweep_x": "dests",
     "num_runs": 1,
     "base_seed": 42,

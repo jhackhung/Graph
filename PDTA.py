@@ -107,22 +107,30 @@ def PDTA_Origin(level: int, r: str, m: int, terminals: Set[str], G: nx.DiGraph) 
 
 memo_stats = {"hits": 0, "misses": 0}
 
-def PDTA(level: int, r: str, m: int, terminals: Set[str], G: nx.DiGraph, interval_len: int = 1, _memo: dict = None):
+def PDTA(level: int, r: str, m: int, terminals: Set[str], G: nx.DiGraph, interval_len: int = 1, _memo: dict = None, _sig=None):
     if _memo is None:
         _memo = {}
 
-    memo_key = (level, r, m, frozenset(terminals), interval_len)
-    if memo_key in _memo:
-        memo_stats["hits"] += 1
-        cached_T, cached_d, cached_record = _memo[memo_key]
-        return cached_T.copy(), cached_d, dict(cached_record)
-
-    memo_stats["misses"] += 1
-    result = _PDTA_impl(level, r, m, terminals, G, interval_len, _memo)
-    _memo[memo_key] = (result[0].copy(), result[1], dict(result[2]))
-    return result
+    # G 在同一次頂層呼叫內不變，signature 只算一次後沿遞迴往下傳
+    if _sig is None:
+        _sig = Algorithm.graph_signature(G)
     
-def _PDTA_impl(level: int, r: str, m: int, terminals: Set[str], G: nx.DiGraph, interval_len: int = 1, _memo: dict = None):
+    use_memo = _memo is not None
+    if use_memo:
+        memo_key = (level, r, m, _sig, frozenset(terminals), interval_len)
+        if memo_key in _memo:
+            memo_stats["hits"] += 1
+            cached_T, cached_d, cached_record = _memo[memo_key]
+            return cached_T.copy(), cached_d, dict(cached_record)
+        memo_stats["misses"] += 1
+    
+    result = _PDTA_impl(level, r, m, terminals, G, interval_len, _memo, _sig)
+    
+    if use_memo:
+        _memo[memo_key] = (result[0].copy(), result[1], dict(result[2]))
+    return result
+
+def _PDTA_impl(level: int, r: str, m: int, terminals: Set[str], G: nx.DiGraph, interval_len: int = 1, _memo: dict = None, _sig=None):
     T_return = nx.DiGraph()
     T_terminals = set(terminals)
     d_T_min_return = INF
@@ -198,7 +206,8 @@ def _PDTA_impl(level: int, r: str, m: int, terminals: Set[str], G: nx.DiGraph, i
                 T_terminals,
                 G,
                 interval_len,
-                _memo
+                _memo,
+                _sig
             )
 
             candidate = _attach_parent_edge(r, v, child_tree, G)

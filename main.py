@@ -384,6 +384,26 @@ def evaluate_tsmta_for_beta(
         beta_runtime_sec=beta_runtime_sec,
     )
 
+# debug
+def save_cache_usage_over_time(
+    cache_usage_by_alpha: dict,
+    cfg: dict,
+    sweep_x: str,
+) -> None:
+    """
+    Save per-time-slot cache cost (CC) and cache-node-usage-count for TSMTA,
+    grouped by alpha, so a separate plotting script can compare them.
+
+    Structure: {alpha_tag: {"cc_per_t": [...], "cache_usage_per_t": [...]}}
+    """
+    pdta_level = int(cfg.get("pdta_level", 2))
+    json_path = f"{sweep_x}_pdta{pdta_level}_cache_usage_over_time.json"
+
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(cache_usage_by_alpha, f, ensure_ascii=False, indent=2)
+
+    print(f"\n💾 Saved cache-usage-over-time data to: {json_path}")
+
 
 def save_all_beta_results(
     all_results: dict,
@@ -485,6 +505,12 @@ def main() -> None:
     algo_names = ["DMTS", "OffPA", "SSSP", "TSMTA"]
     all_results = make_empty_results(beta_values, alpha_values, algo_names)
 
+    # debug
+    # TSMTA per-time-slot cache cost / cache-usage-count, collected per alpha across runs.
+    cache_usage_runs_by_alpha: dict[str, list[tuple[list[float], list[int]]]] = {
+        float_to_tag(alpha): [] for alpha in alpha_values
+    }
+
     print(f"📌 sweep_x = {sweep_x}")
     print(f"📌 beta_values = {beta_values}")
     print(f"📌 alpha_values = {alpha_values}")
@@ -562,7 +588,18 @@ def main() -> None:
                 pdta_level=pdta_level,
                 alpha=alpha,
             )
-        
+
+            # debug
+            # cc_per_t 存原始 cache cost（不乘 alpha），與 Excel 的 CC 欄位一致
+            cc_per_t, cache_usage_per_t = TVM.CC_multicast_per_time(
+                T_TSMTA_base,
+                src_nodes,
+                caches,
+                time_slots,
+                alpha=1.0,
+            )
+            cache_usage_runs_by_alpha[float_to_tag(alpha)].append((cc_per_t, cache_usage_per_t))
+
             for beta in beta_values:
                 print("\n" + "-" * 60)
                 print(f"📌 Evaluate beta = {beta}")
@@ -604,6 +641,23 @@ def main() -> None:
         algo_names=algo_names,
         cfg=cfg,
         num_runs=num_runs,
+        sweep_x=sweep_x,
+    )
+
+    # debug
+    # Average the per-time-slot cache data across runs for each alpha.
+    cache_usage_by_alpha = {}
+    for alpha_tag, runs in cache_usage_runs_by_alpha.items():
+        cc_matrix = np.array([r[0] for r in runs])
+        usage_matrix = np.array([r[1] for r in runs])
+        cache_usage_by_alpha[alpha_tag] = {
+            "cc_per_t": cc_matrix.mean(axis=0).tolist(),
+            "cache_usage_per_t": usage_matrix.mean(axis=0).tolist(),
+        }
+
+    save_cache_usage_over_time(
+        cache_usage_by_alpha=cache_usage_by_alpha,
+        cfg=cfg,
         sweep_x=sweep_x,
     )
 
