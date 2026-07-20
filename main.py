@@ -167,6 +167,24 @@ def Execute_TSMTA(
 # Utility functions
 # =========================================================
 
+ALL_ALGOS = ["DMTS", "OffPA", "SSSP", "TSMTA"]
+ALGO_CANONICAL = {algo.lower(): algo for algo in ALL_ALGOS}
+
+def parse_algos(spec: str) -> list[str]:
+    """'all' 或逗號分隔的 'dmts,sssp' → ['DMTS', 'SSSP'](保持 ALL_ALGOS 順序)。"""
+    spec = spec.strip().lower()
+    if spec == "all":
+        return list(ALL_ALGOS)
+
+    selected = set()
+    for token in spec.split(","):
+        token = token.strip()
+        if token not in ALGO_CANONICAL:
+            raise ValueError(f"未知的演算法 '{token}',可用: all | dmts | offpa | sssp | tsmta")
+        selected.add(ALGO_CANONICAL[token])
+
+    return [a for a in ALL_ALGOS if a in selected]
+
 def float_to_tag(f: float | int) -> str:
     ff = float(f)
     if ff.is_integer():
@@ -259,46 +277,36 @@ def evaluate_fixed_tree_algorithms_for_beta(
     all_results: dict,
     beta: float,
     alpha: float,
-    T_DMTS: dict[tuple[int, int], nx.DiGraph],
-    T_OffPA: dict[tuple[int, int], nx.DiGraph],
-    T_SSSP: dict[tuple[int, int], nx.DiGraph],
+    fixed_trees: dict[str, dict[tuple[int, int], nx.DiGraph]], # {algo_name: T_i_t}
     src_nodes: list[str],
     caches: list[str],
     time_slots: int,
 ) -> None:
     """DMTS / OffPA / SSSP do not depend on beta, so only re-evaluate RC/Total."""
-    bc, cc, rc, total = TVM.evaluate_algorithm(
-        "DMTS",
-        T_DMTS,
-        src_nodes,
-        caches,
-        time_slots,
-        beta=beta,
-        alpha=alpha
-    )
-    append_result(all_results, beta, alpha, "DMTS", bc, cc, rc, total)
+    for algo, tree in fixed_trees.items():
+        if (tree is None):
+            continue
+        
+        bc, cc, rc, total = TVM.evaluate_algorithm(
+            algo,
+            tree,
+            src_nodes,
+            caches,
+            time_slots,
+            beta=beta,
+            alpha=alpha
+        )
 
-    bc, cc, rc, total = TVM.evaluate_algorithm(
-        "OffPA",
-        T_OffPA,
-        src_nodes,
-        caches,
-        time_slots,
-        beta=beta,
-        alpha=alpha
-    )
-    append_result(all_results, beta, alpha, "OffPA", bc, cc, rc, total)
-
-    bc, cc, rc, total = TVM.evaluate_algorithm(
-        "SSSP",
-        T_SSSP,
-        src_nodes,
-        caches,
-        time_slots,
-        beta=beta,
-        alpha=alpha
-    )
-    append_result(all_results, beta, alpha, "SSSP", bc, cc, rc, total)
+        append_result(
+            all_results,
+            beta,
+            alpha,
+            algo,
+            bc,
+            cc,
+            rc,
+            total
+        )
 
 
 def evaluate_tsmta_for_beta(
@@ -461,6 +469,8 @@ def save_all_beta_results(
                     "beta": float(beta),
                     "alpha": float(alpha),
                     "PDTA_k": pdta_level,
+                    "base_seed": int(cfg.get("base_seed", 42)),
+                    "num_runs": num_runs,
                     "Total_Runtime_sec": mean_build_runtime + mean_beta_runtime,
                 }
 
@@ -478,7 +488,7 @@ def save_all_beta_results(
 
 def main() -> None:
     if len(sys.argv) < 2:
-        print("用法: python main.py <config.json> [sats|dests]")
+        print("用法: python main.py <config.json> [sats|dests] [all|dmts,sssp|...]")
         sys.exit(1)
 
     config_path = sys.argv[1]
@@ -498,11 +508,16 @@ def main() -> None:
     sweep_x = sys.argv[2] if len(sys.argv) >= 3 else cfg.get("sweep_x", "sats")
     num_runs = int(cfg.get("num_runs", 1))
     base_seed = int(cfg.get("base_seed", 42))
+    algos_spec = cfg.get("algos", "all")
+    if (len(sys.argv) >= 4):
+        algos_spec = sys.argv[3]
 
     if sweep_x not in ("sats", "dests"):
         raise ValueError("sweep_x must be either 'sats' or 'dests'.")
 
-    algo_names = ["DMTS", "OffPA", "SSSP", "TSMTA"]
+    algo_names = parse_algos(str(algos_spec))
+    run_tsmta = "TSMTA" in algo_names
+    
     all_results = make_empty_results(beta_values, alpha_values, algo_names)
 
     # debug
@@ -511,6 +526,7 @@ def main() -> None:
         float_to_tag(alpha): [] for alpha in alpha_values
     }
 
+    print(f"📌 algos = {algo_names}")
     print(f"📌 sweep_x = {sweep_x}")
     print(f"📌 beta_values = {beta_values}")
     print(f"📌 alpha_values = {alpha_values}")
@@ -564,41 +580,49 @@ def main() -> None:
         # ==================================================
         # Build each algorithm once per run.
         # ==================================================
-        print("\n--- Build DMTS once ---")
-        T_DMTS = Execute_DMTS(graphs, time_slots)
+        T_DMTS = None
+        T_SSSP = None
+        
+        if "DMTS" in algo_names:
+            print("\n--- Build DMTS once ---")
+            T_DMTS = Execute_DMTS(graphs, time_slots)
 
-        print("\n--- Build SSSP once ---")
-        T_SSSP = Execute_SSSP_Union(graphs, time_slots, src_nodes, dest_nodes)
+        if "SSSP" in algo_names:
+            print("\n--- Build SSSP once ---")
+            T_SSSP = Execute_SSSP_Union(graphs, time_slots, src_nodes, dest_nodes)
 
         # ==================================================
         # beta loop
         # ==================================================
         for alpha in alpha_values:
-            print("\n--- Build OffPA once ---")
-            T_OffPA = Execute_OffPA(graphs, caches, time_slots, alpha=alpha)
+            T_OffPA = None
+            if "OffPA" in algo_names:
+                print("\n--- Build OffPA once ---")
+                T_OffPA = Execute_OffPA(graphs, caches, time_slots, alpha=alpha)
 
-            print("\n--- Build TSMTA base once ---")
-            T_TSMTA_base, TIG, TIG_Edges_Map, tsmta_build_runtime_sec = Execute_TSMTA(
-                graphs,
-                src_nodes,
-                caches,
-                dest_nodes,
-                node_attr_map,
-                time_slots,
-                pdta_level=pdta_level,
-                alpha=alpha,
-            )
+            if run_tsmta:
+                print("\n--- Build TSMTA base once ---")
+                T_TSMTA_base, TIG, TIG_Edges_Map, tsmta_build_runtime_sec = Execute_TSMTA(
+                    graphs,
+                    src_nodes,
+                    caches,
+                    dest_nodes,
+                    node_attr_map,
+                    time_slots,
+                    pdta_level=pdta_level,
+                    alpha=alpha,
+                )
 
-            # debug
-            # cc_per_t 存原始 cache cost（不乘 alpha），與 Excel 的 CC 欄位一致
-            cc_per_t, cache_usage_per_t = TVM.CC_multicast_per_time(
-                T_TSMTA_base,
-                src_nodes,
-                caches,
-                time_slots,
-                alpha=1.0,
-            )
-            cache_usage_runs_by_alpha[float_to_tag(alpha)].append((cc_per_t, cache_usage_per_t))
+                # debug
+                # cc_per_t 存原始 cache cost（不乘 alpha），與 Excel 的 CC 欄位一致
+                cc_per_t, cache_usage_per_t = TVM.CC_multicast_per_time(
+                    T_TSMTA_base,
+                    src_nodes,
+                    caches,
+                    time_slots,
+                    alpha=1.0,
+                )
+                cache_usage_runs_by_alpha[float_to_tag(alpha)].append((cc_per_t, cache_usage_per_t))
 
             for beta in beta_values:
                 print("\n" + "-" * 60)
@@ -610,29 +634,28 @@ def main() -> None:
                     all_results=all_results,
                     beta=beta,
                     alpha=alpha,
-                    T_DMTS=T_DMTS,
-                    T_OffPA=T_OffPA,
-                    T_SSSP=T_SSSP,
+                    fixed_trees={"DMTS": T_DMTS, "OffPA": T_OffPA, "SSSP": T_SSSP},
                     src_nodes=src_nodes,
                     caches=caches,
                     time_slots=time_slots,
                 )
                 
-                evaluate_tsmta_for_beta(
-                    all_results=all_results,
-                    beta=beta,
-                    alpha=alpha,
-                    T_TSMTA_base=T_TSMTA_base,
-                    TIG=TIG,
-                    TIG_Edges_Map=TIG_Edges_Map,
-                    src_nodes=src_nodes,
-                    caches=caches,
-                    node_attr_map=node_attr_map,
-                    time_slots=time_slots,
-                    cfg=cfg,
-                    current_seed=current_seed,
-                    tsmta_build_runtime_sec=tsmta_build_runtime_sec,
-                )
+                if run_tsmta:
+                    evaluate_tsmta_for_beta(
+                        all_results=all_results,
+                        beta=beta,
+                        alpha=alpha,
+                        T_TSMTA_base=T_TSMTA_base,
+                        TIG=TIG,
+                        TIG_Edges_Map=TIG_Edges_Map,
+                        src_nodes=src_nodes,
+                        caches=caches,
+                        node_attr_map=node_attr_map,
+                        time_slots=time_slots,
+                        cfg=cfg,
+                        current_seed=current_seed,
+                        tsmta_build_runtime_sec=tsmta_build_runtime_sec,
+                    )
 
     save_all_beta_results(
         all_results=all_results,
@@ -646,20 +669,21 @@ def main() -> None:
 
     # debug
     # Average the per-time-slot cache data across runs for each alpha.
-    cache_usage_by_alpha = {}
-    for alpha_tag, runs in cache_usage_runs_by_alpha.items():
-        cc_matrix = np.array([r[0] for r in runs])
-        usage_matrix = np.array([r[1] for r in runs])
-        cache_usage_by_alpha[alpha_tag] = {
-            "cc_per_t": cc_matrix.mean(axis=0).tolist(),
-            "cache_usage_per_t": usage_matrix.mean(axis=0).tolist(),
-        }
+    if run_tsmta:
+        cache_usage_by_alpha = {}
+        for alpha_tag, runs in cache_usage_runs_by_alpha.items():
+            cc_matrix = np.array([r[0] for r in runs])
+            usage_matrix = np.array([r[1] for r in runs])
+            cache_usage_by_alpha[alpha_tag] = {
+                "cc_per_t": cc_matrix.mean(axis=0).tolist(),
+                "cache_usage_per_t": usage_matrix.mean(axis=0).tolist(),
+            }
 
-    save_cache_usage_over_time(
-        cache_usage_by_alpha=cache_usage_by_alpha,
-        cfg=cfg,
-        sweep_x=sweep_x,
-    )
+        save_cache_usage_over_time(
+            cache_usage_by_alpha=cache_usage_by_alpha,
+            cfg=cfg,
+            sweep_x=sweep_x,
+        )
 
     print("\n🎉 All beta experiments finished!")
 

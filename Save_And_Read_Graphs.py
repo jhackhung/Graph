@@ -3,6 +3,24 @@ import networkx as nx
 import numpy as np
 import pandas as pd
 
+UPSERT_KEYS = ["graph", "algo", "beta", "alpha", "PDTA_k"]
+FAIRNESS_KEYS = ["base_seed", "num_runs"]
+
+def row_matches(df: pd.DataFrame, result_row: dict) -> pd.Series:
+    """回傳 boolean mask:df 中與 result_row 的 upsert key 全部相符的 rows。"""
+    mask = pd.Series(True, index=df.index)
+    for key in UPSERT_KEYS:
+        if key not in df.columns:
+            # 舊格式檔案缺 key 欄位視為不相符, 使用 append
+            return pd.Series(False, index=df.index)
+        col = df[key]
+        val = result_row[key]
+        if isinstance(val, float):
+            mask &= np.isclose(col.astype(float), val, rtol=1e-9, atol=1e-12)
+        else:
+            mask &= (col.astype(str) == str(val))
+    return mask
+
 def save_graph_sequence_to_txt(graph_seq, dir_path="output_graphs"):
     """
     儲存一串時間序列的 DiGraph
@@ -94,22 +112,58 @@ def load_graph_sequence_from_txt(path: str, idx: int | None = None) -> list[nx.D
     return graphs
 
 def save_result_to_excel(excel_path: str, result_row: dict):
+    """
+    Upsert: 若已存在相同 (graph, algo, beta, alpha, PDTA_k) 的 row 就整列覆蓋,
+    否則 append。覆蓋時沿用原 experiment_id,只更新內容與 timestamp。
+    """
     if not os.path.exists(excel_path):
+        result_row["experiment_id"] = 1
         df = pd.DataFrame([result_row])
         df.to_excel(excel_path, index=False)
         print(f"[Excel] created: {excel_path}")
         return
     
     df = pd.read_excel(excel_path)
+    mask = row_matches(df, result_row)
+    matched = df.index[mask]
+    
+    if len(matched) > 0:
+        # 警告：base_seed/num_runs 不同
+        for fk in FAIRNESS_KEYS:
+            if fk in df.columns and fk in result_row:
+                old_val = df.loc[matched[0], fk]
+                if pd.notna(old_val) and str(old_val) != str(result_row[fk]):
+                    print(
+                        f"[Excel] ⚠ WARNING: {fk} mismatch for "
+                        f"({result_row['graph']}, {result_row['algo']}): "
+                        f"old={old_val}, new={result_row[fk]} — "
+                        f"此演算法用的圖集與其他演算法不同,比較可能不公平!"
+                    )
 
-    if "experiment_id" in df.columns:
-        last_id = df["experiment_id"].max()
-        last_id = 0 if pd.isna(last_id) else last_id
+        old_id = df.loc[matched[0], "experiment_id"] if "experiment_id" in df.columns else None
+        result_row["experiment_id"] = old_id
+        
+        if len(matched) > 1:
+            print(f"[Excel] ⚠ Found {len(matched)} duplicate rows for the same key, collapsing to 1.")
+            df = df.drop(index=matched[1:])
+            mask = row_matches(df, result_row)
+
+        for col, val in result_row.items():
+            if col not in df.columns:
+                df[col] = pd.NA  # 舊檔案補新欄位(如 base_seed/num_runs)
+            df.loc[mask, col] = val
+
+        df.to_excel(excel_path, index=False)
+        print(f"[Excel] updated row ({result_row['graph']}, {result_row['algo']}) → {excel_path}")
     else:
-        last_id = 0
+        if "experiment_id" in df.columns:
+            last_id = df["experiment_id"].max()
+            last_id = 0 if pd.isna(last_id) else last_id
+        else:
+            last_id = 0
 
-    result_row["experiment_id"] = last_id + 1
+        result_row["experiment_id"] = last_id + 1
 
-    df = pd.concat([df, pd.DataFrame([result_row])], ignore_index=True)
-    df.to_excel(excel_path, index=False)
-    print(f"[Excel] appended row (id={last_id+1}) → {excel_path}")
+        df = pd.concat([df, pd.DataFrame([result_row])], ignore_index=True)
+        df.to_excel(excel_path, index=False)
+        print(f"[Excel] appended row (id={last_id+1}) → {excel_path}")
