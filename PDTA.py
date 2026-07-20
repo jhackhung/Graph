@@ -108,9 +108,6 @@ def PDTA_Origin(level: int, r: str, m: int, terminals: Set[str], G: nx.DiGraph) 
 memo_stats = {"hits": 0, "misses": 0}
 
 def PDTA(level: int, r: str, m: int, terminals: Set[str], G: nx.DiGraph, interval_len: int = 1, _memo: dict = None, _sig=None):
-    if _memo is None:
-        _memo = {}
-
     # G 在同一次頂層呼叫內不變，signature 只算一次後沿遞迴往下傳
     if _sig is None:
         _sig = Algorithm.graph_signature(G)

@@ -286,7 +286,7 @@ def TSMTA(
     print(
         f"[PDTA memo] hits={PDTA.memo_stats['hits']}, "
         f"misses={PDTA.memo_stats['misses']}, "
-        f"memo_size={len(pdta_memo)}, "
+        f"memo_size={len(pdta_memo) if pdta_memo is not None else 0}, "
         f"outer_cache_hits={cache_hits}, outer_pdta_calls={pdta_calls}"
     )
     time.sleep(0.5)
