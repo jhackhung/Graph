@@ -300,6 +300,8 @@ def collect_plot_data(df, metric, x_col, selected_points):
 
         if std_col in df_algo.columns and df_algo[std_col].notna().any():
             y_err = (df_algo[std_col] / 1000.0).fillna(0.0)
+            if (y_err == 0).all():
+                y_err = None
         else:
             y_err = None
 
@@ -399,6 +401,10 @@ def configure_x_axis(ax, x_ticks, x_tick_labels, x_label):
     ax.set_xticklabels(x_tick_labels)
     ax.set_xlabel(x_label, labelpad=6)
 
+def min_max_with_err(data):
+    y = data["y"]
+    err = data["y_err"] if data["y_err"] is not None else 0.0
+    return (y - err).min(), (y + err).max()
 
 def plot_metric_normal(
     plot_data,
@@ -499,25 +505,20 @@ def plot_metric_broken(
             **STYLES["OffPA"]
         )
 
-    low_values = []
-    high_values = []
+    low_bounds = [
+        min_max_with_err(plot_data[algo])
+        for algo in low_algos
+        if algo in plot_data
+    ]
 
-    for algo in low_algos:
-        if algo in plot_data:
-            low_values.extend(list(plot_data[algo]["y"]))
-
-    if "OffPA" in plot_data:
-        high_values.extend(list(plot_data["OffPA"]["y"]))
-
-    if not low_values:
+    if not low_bounds:
         raise ValueError(f"No low-value algorithm data found for metric {metric}.")
-    if not high_values:
+    if "OffPA" not in plot_data:
         raise ValueError(f"No OffPA data found for metric {metric}.")
 
-    low_min = min(low_values)
-    low_max = max(low_values)
-    high_min = min(high_values)
-    high_max = max(high_values)
+    low_min = min(d[0] for d in low_bounds)
+    low_max = max(d[1] for d in low_bounds)
+    high_min, high_max = min_max_with_err(plot_data["OffPA"])
 
     low_range = low_max - low_min
     high_range = high_max - high_min
