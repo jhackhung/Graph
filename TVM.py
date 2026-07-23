@@ -468,8 +468,8 @@ def evaluate_multicast_algorithm(name: str,
         bc = BC_multicast(T_i_t, src_nodes, total_time)
         cc = CC_multicast(T_i_t, src_nodes, caches, total_time, alpha=1.0)
 
-    rc = RC_multicast(T_i_t, src_nodes, total_time, beta)
-    total = bc + alpha * cc + rc
+    rc = RC_multicast(T_i_t, src_nodes, total_time)
+    total = bc + alpha * cc + beta * rc
     
     if output:
         print(f"[{name}] BC={bc:.2f}, CC={cc:.2f}, RC={rc:.2f}, Total={total:.2f}")
@@ -481,8 +481,7 @@ def evaluate_multicast_algorithm(name: str,
 # OffPA / STARFRONT
 # =========================================================
 
-def RC_offpa_from_graph_diff(T_i_t: dict[tuple[int, int], nx.DiGraph],
-                             beta: float = 10.0) -> float:
+def RC_offpa_from_graph_diff(T_i_t: dict[tuple[int, int], nx.DiGraph]) -> float:
     """
     Surrogate RC for OffPA:
     use edge symmetric difference between adjacent time slots.
@@ -513,7 +512,7 @@ def RC_offpa_from_graph_diff(T_i_t: dict[tuple[int, int], nx.DiGraph],
 
             total_cost += len(edges1.symmetric_difference(edges2))
 
-    return total_cost * beta
+    return total_cost
 
 
 def evaluate_offpa(T_i_t: dict[tuple[int, int], nx.DiGraph],
@@ -545,8 +544,8 @@ def evaluate_offpa(T_i_t: dict[tuple[int, int], nx.DiGraph],
 
     bc = ct_dist + ct_access
     cc = ct_storage  # 原始 storage cost（不含 alpha），見 OffPA.py 的 CT_storage 儲存處
-    rc = RC_offpa_from_graph_diff(T_i_t, beta=beta)
-    total = bc + alpha * cc + rc
+    rc = RC_offpa_from_graph_diff(T_i_t)
+    total = bc + alpha * cc + beta * rc
 
     if output:
         print(f"[OffPA] BC={bc:.2f}, CC={cc:.2f}, RC={rc:.2f}, Total={total:.2f}")

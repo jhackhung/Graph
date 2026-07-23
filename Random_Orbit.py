@@ -231,9 +231,11 @@ def generate_graph_sequence_realistic(
     rng = random.Random(seed)
     rng_node = random.Random(seed + 99991)
     np.random.seed(seed)
-    rng_src_pos = random.Random(1001)   
-    rng_dest_pos = random.Random(2002)  
-    rng_cloud_pos = random.Random(3003) 
+    # debug
+    pos_seed = seed - 42
+    rng_src_pos = random.Random(pos_seed + 1001)
+    rng_dest_pos = random.Random(pos_seed + 2002)
+    rng_cloud_pos = random.Random(pos_seed + 3003)
 
     def _gen_random_sphere_pos(generator):
         lat_rad = math.radians(generator.uniform(-70, 70))

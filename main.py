@@ -522,9 +522,9 @@ def main() -> None:
 
     # debug
     # TSMTA per-time-slot cache cost / cache-usage-count, collected per alpha across runs.
-    cache_usage_runs_by_alpha: dict[str, list[tuple[list[float], list[int]]]] = {
-        float_to_tag(alpha): [] for alpha in alpha_values
-    }
+    # cache_usage_runs_by_alpha: dict[str, list[tuple[list[float], list[int]]]] = {
+    #     float_to_tag(alpha): [] for alpha in alpha_values
+    # }
 
     print(f"📌 algos = {algo_names}")
     print(f"📌 sweep_x = {sweep_x}")
@@ -615,14 +615,14 @@ def main() -> None:
 
                 # debug
                 # cc_per_t 存原始 cache cost（不乘 alpha），與 Excel 的 CC 欄位一致
-                cc_per_t, cache_usage_per_t = TVM.CC_multicast_per_time(
-                    T_TSMTA_base,
-                    src_nodes,
-                    caches,
-                    time_slots,
-                    alpha=1.0,
-                )
-                cache_usage_runs_by_alpha[float_to_tag(alpha)].append((cc_per_t, cache_usage_per_t))
+                # cc_per_t, cache_usage_per_t = TVM.CC_multicast_per_time(
+                #     T_TSMTA_base,
+                #     src_nodes,
+                #     caches,
+                #     time_slots,
+                #     alpha=1.0,
+                # )
+                # cache_usage_runs_by_alpha[float_to_tag(alpha)].append((cc_per_t, cache_usage_per_t))
 
             for beta in beta_values:
                 print("\n" + "-" * 60)
@@ -669,21 +669,21 @@ def main() -> None:
 
     # debug
     # Average the per-time-slot cache data across runs for each alpha.
-    if run_tsmta:
-        cache_usage_by_alpha = {}
-        for alpha_tag, runs in cache_usage_runs_by_alpha.items():
-            cc_matrix = np.array([r[0] for r in runs])
-            usage_matrix = np.array([r[1] for r in runs])
-            cache_usage_by_alpha[alpha_tag] = {
-                "cc_per_t": cc_matrix.mean(axis=0).tolist(),
-                "cache_usage_per_t": usage_matrix.mean(axis=0).tolist(),
-            }
+    # if run_tsmta:
+    #     cache_usage_by_alpha = {}
+    #     for alpha_tag, runs in cache_usage_runs_by_alpha.items():
+    #         cc_matrix = np.array([r[0] for r in runs])
+    #         usage_matrix = np.array([r[1] for r in runs])
+    #         cache_usage_by_alpha[alpha_tag] = {
+    #             "cc_per_t": cc_matrix.mean(axis=0).tolist(),
+    #             "cache_usage_per_t": usage_matrix.mean(axis=0).tolist(),
+    #         }
 
-        save_cache_usage_over_time(
-            cache_usage_by_alpha=cache_usage_by_alpha,
-            cfg=cfg,
-            sweep_x=sweep_x,
-        )
+    #     save_cache_usage_over_time(
+    #         cache_usage_by_alpha=cache_usage_by_alpha,
+    #         cfg=cfg,
+    #         sweep_x=sweep_x,
+    #     )
 
     print("\n🎉 All beta experiments finished!")
 

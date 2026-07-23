@@ -132,7 +132,7 @@ def save_result_to_excel(excel_path: str, result_row: dict):
         for fk in FAIRNESS_KEYS:
             if fk in df.columns and fk in result_row:
                 old_val = df.loc[matched[0], fk]
-                if pd.notna(old_val) and str(old_val) != str(result_row[fk]):
+                if pd.notna(old_val) and float(old_val) != float(result_row[fk]):
                     print(
                         f"[Excel] ⚠ WARNING: {fk} mismatch for "
                         f"({result_row['graph']}, {result_row['algo']}): "
