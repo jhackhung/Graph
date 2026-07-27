@@ -330,6 +330,51 @@ def evaluate_tsmta_for_beta(
     """
     beta_start_time = time.time()
 
+    T_TSMTA_before = copy_tree_sequence(T_TSMTA_base)
+
+    TVM.expand_virtual_edges(
+        T_i_t=T_TSMTA_before,
+        TIG_Interval=TIG,
+        TIG_Edges_Map=TIG_Edges_Map,
+        srcs=src_nodes,
+        caches=caches,
+        total_time=time_slots,
+    )
+
+    bc_before, cc_before, rc_before, total_before = TVM.evaluate_algorithm(
+        "TSMTA",
+        T_TSMTA_before,
+        src_nodes,
+        caches,
+        time_slots,
+        beta=beta,
+        alpha=alpha
+    )
+
+    print(
+        f"[RAW TSMTA-Raw] PDTA_k={int(cfg.get('pdta_level', 2))} "
+        f"beta={beta} "
+        f"alpha={alpha} "
+        f"sweep_n_sats={cfg['n_sats']} "
+        f"sweep_n_dests={cfg['n_dests']} "
+        f"seed={current_seed} "
+        f"BC={bc_before:.2f}, CC={cc_before:.2f}, RC={rc_before:.2f}, Total={total_before:.2f}, "
+        f"BuildRuntime={tsmta_build_runtime_sec:.4f}s"
+    )
+
+    append_result(
+        all_results,
+        beta,
+        alpha,
+        "TSMTA-Raw",
+        bc_before,
+        cc_before,
+        rc_before,
+        total_before,
+        build_runtime_sec=tsmta_build_runtime_sec,
+        beta_runtime_sec=0.0,
+    )
+
     T_TSMTA = copy_tree_sequence(T_TSMTA_base)
 
     TVM.Optimal(
@@ -368,7 +413,7 @@ def evaluate_tsmta_for_beta(
     pdta_level = int(cfg.get("pdta_level", 2))
 
     print(
-        f"[RAW TSMTA] PDTA_k={pdta_level} "
+        f"[RAW TSMTA-Optimal] PDTA_k={pdta_level} "
         f"beta={beta} "
         f"alpha={alpha} "
         f"sweep_n_sats={cfg['n_sats']} "
@@ -383,7 +428,7 @@ def evaluate_tsmta_for_beta(
         all_results,
         beta,
         alpha,
-        "TSMTA",
+        "TSMTA-Optimal",
         bc,
         cc,
         rc,
@@ -518,7 +563,10 @@ def main() -> None:
     algo_names = parse_algos(str(algos_spec))
     run_tsmta = "TSMTA" in algo_names
     
-    all_results = make_empty_results(beta_values, alpha_values, algo_names)
+    save_algo_names = [
+        ("TSMTA-Optimal" if algo == "TSMTA" else algo) for algo in algo_names
+    ] + (["TSMTA-Raw"] if run_tsmta else [])
+    all_results = make_empty_results(beta_values, alpha_values, save_algo_names)
 
     # debug
     # TSMTA per-time-slot cache cost / cache-usage-count, collected per alpha across runs.
@@ -661,7 +709,7 @@ def main() -> None:
         all_results=all_results,
         beta_values=beta_values,
         alpha_values=alpha_values,
-        algo_names=algo_names,
+        algo_names=save_algo_names,
         cfg=cfg,
         num_runs=num_runs,
         sweep_x=sweep_x,

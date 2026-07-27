@@ -57,11 +57,18 @@ STYLES = {
         "linewidth": 2.6,
         "markersize": 6
     },
-    "TSMTA": {
+    "TSMTA-Optimal": {
         "color": "red",
         "marker": "s",
         "linestyle": "--",
         "linewidth": 2.6,
+        "markersize": 6
+    },
+    "TSMTA-Raw": {
+        "color": "salmon",
+        "marker": "s",
+        "linestyle": ":",
+        "linewidth": 2.0,
         "markersize": 6
     },
     "SSSP": {
@@ -280,7 +287,7 @@ def load_alpha_excels(excel_paths, fixed_type, fixed_value):
     return merged, x_ticks, x_tick_labels
 
 def collect_plot_data(df, metric, x_col, selected_points):
-    low_algos = ["DMTS", "TSMTA", "SSSP"]
+    low_algos = ["DMTS", "TSMTA-Raw", "TSMTA-Optimal", "SSSP"]
     high_algos = ["OffPA"]
     algos = low_algos + high_algos
 
@@ -317,13 +324,12 @@ def collect_plot_data(df, metric, x_col, selected_points):
 def should_use_broken_axis(plot_data, break_ratio):
     """
     Use broken y-axis only when OffPA is clearly separated from
-    DMTS / TSMTA / SSSP.
+    DMTS / TSMTA-Raw / TSMTA-Optimal / SSSP.
 
     Condition:
-        min(OffPA) / max(DMTS, TSMTA, SSSP) >= break_ratio
+        min(OffPA) / max(DMTS, TSMTA-Raw, TSMTA-Optimal, SSSP) >= break_ratio
     """
-    low_algos = ["DMTS", "TSMTA", "SSSP"]
-
+    low_algos = ["DMTS", "TSMTA-Raw", "TSMTA-Optimal", "SSSP"]
     low_values = []
     high_values = []
 
@@ -417,7 +423,9 @@ def plot_metric_normal(
     """Normal y-axis figure."""
     fig, ax = plt.subplots(figsize=(FIG_WIDTH, FIG_HEIGHT))
 
-    algos = ["DMTS", "TSMTA", "SSSP", "OffPA"]
+    low_algos = ["DMTS", "TSMTA-Raw", "TSMTA-Optimal", "SSSP"]
+    high_algos = ["OffPA"]
+    algos = low_algos + high_algos
 
     for algo in algos:
         if algo not in plot_data:
@@ -459,7 +467,7 @@ def plot_metric_broken(
 ):
     """
     Broken y-axis version:
-    - ax_bottom: DMTS / TSMTA / SSSP
+    - ax_bottom: DMTS / TSMTA-Raw / TSMTA-Optimal / SSSP
     - ax_top: OffPA
     """
     fig, (ax_top, ax_bottom) = plt.subplots(
@@ -472,7 +480,7 @@ def plot_metric_broken(
         }
     )
 
-    low_algos = ["DMTS", "TSMTA", "SSSP"]
+    low_algos = ["DMTS", "TSMTA-Raw", "TSMTA-Optimal", "SSSP"]
 
     for algo in low_algos:
         if algo not in plot_data:
@@ -698,7 +706,7 @@ def main():
     x_config = get_x_config(args.x)
     x_col = x_config["x_col"]
     x_label = x_config["x_label"]
-    base_dir = "img1/"
+    base_dir = "img_dests_beta/"
 
     print(f"📌 X-axis mode: {args.x}")
     print(f"📌 X-axis label: {x_label}")
