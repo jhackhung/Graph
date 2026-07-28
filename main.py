@@ -118,7 +118,8 @@ def Execute_TSMTA(
     node_attr_map: dict,
     time_slots: int,
     pdta_level: int = 2,
-    alpha: float = 1.0
+    alpha: float = 1.0,
+    beta: float = 1.0
 ) -> tuple[dict[tuple[int, int], nx.DiGraph], dict, dict]:
     """
     Run TSMTA base once.
@@ -151,6 +152,7 @@ def Execute_TSMTA(
         time_slots,
         node_attr_map,
         pdta_level=pdta_level,
+        beta=beta,
     )
 
     tsmta_build_runtime_sec = time.time() - start_time
@@ -648,31 +650,32 @@ def main() -> None:
                 print("\n--- Build OffPA once ---")
                 T_OffPA = Execute_OffPA(graphs, caches, time_slots, alpha=alpha)
 
-            if run_tsmta:
-                print("\n--- Build TSMTA base once ---")
-                T_TSMTA_base, TIG, TIG_Edges_Map, tsmta_build_runtime_sec = Execute_TSMTA(
-                    graphs,
-                    src_nodes,
-                    caches,
-                    dest_nodes,
-                    node_attr_map,
-                    time_slots,
-                    pdta_level=pdta_level,
-                    alpha=alpha,
-                )
-
-                # debug
-                # cc_per_t 存原始 cache cost（不乘 alpha），與 Excel 的 CC 欄位一致
-                # cc_per_t, cache_usage_per_t = TVM.CC_multicast_per_time(
-                #     T_TSMTA_base,
-                #     src_nodes,
-                #     caches,
-                #     time_slots,
-                #     alpha=1.0,
-                # )
-                # cache_usage_runs_by_alpha[float_to_tag(alpha)].append((cc_per_t, cache_usage_per_t))
-
             for beta in beta_values:
+                if run_tsmta:
+                    print("\n--- Build TSMTA base once ---")
+                    T_TSMTA_base, TIG, TIG_Edges_Map, tsmta_build_runtime_sec = Execute_TSMTA(
+                        graphs,
+                        src_nodes,
+                        caches,
+                        dest_nodes,
+                        node_attr_map,
+                        time_slots,
+                        pdta_level=pdta_level,
+                        alpha=alpha,
+                        beta=beta
+                    )
+
+                    # debug
+                    # cc_per_t 存原始 cache cost（不乘 alpha），與 Excel 的 CC 欄位一致
+                    # cc_per_t, cache_usage_per_t = TVM.CC_multicast_per_time(
+                    #     T_TSMTA_base,
+                    #     src_nodes,
+                    #     caches,
+                    #     time_slots,
+                    #     alpha=1.0,
+                    # )
+                    # cache_usage_runs_by_alpha[float_to_tag(alpha)].append((cc_per_t, cache_usage_per_t))
+                       
                 print("\n" + "-" * 60)
                 print(f"📌 Evaluate beta = {beta}")
                 print(f"\n📌 Evaluate alpha = {alpha} ---")
