@@ -110,28 +110,40 @@ def Execute_OffPA(
     return T_i_t
 
 
-def Execute_TSMTA(
+def Build_TIG_CTIG(
     graphs: list[nx.Graph],
+    src_nodes: list[str],
+    caches: list[str],
+    alpha: float = 1.0,
+) -> tuple[dict, dict, dict, dict]:
+    """
+    Build TIG/CTIG once per alpha. Does not depend on beta, so callers
+    should build this a single time per alpha and reuse it across the
+    whole beta sweep instead of rebuilding it for every beta.
+    """
+    caches = [n for n, d in graphs[0].nodes(data=True) if d.get("cache") is True]
+    return TVM.TIG_CTIG(graphs, src_nodes, caches, alpha=alpha)
+
+
+def Run_TSMTA_Select(
+    TIG: dict,
+    CTIG: dict,
+    TIG_Edges_Map: dict,
+    CTIG_Edges_Map: dict,
     src_nodes: list[str],
     caches: list[str],
     dest_nodes: set[str],
     node_attr_map: dict,
     time_slots: int,
     pdta_level: int = 2,
-    alpha: float = 1.0,
-    beta: float = 1.0
-) -> tuple[dict[tuple[int, int], nx.DiGraph], dict, dict]:
+    beta: float = 1.0,
+) -> tuple[dict[tuple[int, int], nx.DiGraph], float]:
     """
-    Run TSMTA base once.
-
-    Note:
-    - TSMTA base tree does not depend on beta.
-    - TVM.Optimal may depend on beta, so it is applied later on a copy.
+    Run TSMTA tree selection for one beta, reusing a TIG/CTIG built once
+    per alpha. TVM.TSMTA copies TIG/CTIG internally before mutating them,
+    so the same TIG/CTIG can be safely reused across multiple beta calls.
     """
     start_time = time.time()
-
-    caches = [n for n, d in graphs[0].nodes(data=True) if d.get("cache") is True]
-    TIG, CTIG, TIG_Edges_Map, CTIG_Edges_Map = TVM.TIG_CTIG(graphs, src_nodes, caches, alpha=alpha)
 
     dests_set = {}
     for idx, _ in enumerate(src_nodes):
@@ -158,11 +170,11 @@ def Execute_TSMTA(
     tsmta_build_runtime_sec = time.time() - start_time
 
     print(
-        f"[TSMTA Build] PDTA_k={pdta_level}, "
+        f"[TSMTA Select] PDTA_k={pdta_level}, beta={beta}, "
         f"runtime={tsmta_build_runtime_sec:.4f}s"
     )
 
-    return T_i_t, TIG, TIG_Edges_Map, tsmta_build_runtime_sec
+    return T_i_t, tsmta_build_runtime_sec
 
 
 # =========================================================
@@ -332,10 +344,10 @@ def evaluate_tsmta_for_beta(
     """
     beta_start_time = time.time()
 
-    T_TSMTA_before = copy_tree_sequence(T_TSMTA_base)
+    T_TSMTA_expanded = copy_tree_sequence(T_TSMTA_base)
 
     TVM.expand_virtual_edges(
-        T_i_t=T_TSMTA_before,
+        T_i_t=T_TSMTA_expanded,
         TIG_Interval=TIG,
         TIG_Edges_Map=TIG_Edges_Map,
         srcs=src_nodes,
@@ -345,7 +357,7 @@ def evaluate_tsmta_for_beta(
 
     bc_before, cc_before, rc_before, total_before = TVM.evaluate_algorithm(
         "TSMTA",
-        T_TSMTA_before,
+        T_TSMTA_expanded,
         src_nodes,
         caches,
         time_slots,
@@ -377,7 +389,7 @@ def evaluate_tsmta_for_beta(
         beta_runtime_sec=0.0,
     )
 
-    T_TSMTA = copy_tree_sequence(T_TSMTA_base)
+    T_TSMTA = copy_tree_sequence(T_TSMTA_expanded)
 
     TVM.Optimal(
         T_TSMTA,
@@ -438,27 +450,6 @@ def evaluate_tsmta_for_beta(
         build_runtime_sec=tsmta_build_runtime_sec,
         beta_runtime_sec=beta_runtime_sec,
     )
-
-# debug
-def save_cache_usage_over_time(
-    cache_usage_by_alpha: dict,
-    cfg: dict,
-    sweep_x: str,
-) -> None:
-    """
-    Save per-time-slot cache cost (CC) and cache-node-usage-count for TSMTA,
-    grouped by alpha, so a separate plotting script can compare them.
-
-    Structure: {alpha_tag: {"cc_per_t": [...], "cache_usage_per_t": [...]}}
-    """
-    pdta_level = int(cfg.get("pdta_level", 2))
-    json_path = f"{sweep_x}_pdta{pdta_level}_cache_usage_over_time.json"
-
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(cache_usage_by_alpha, f, ensure_ascii=False, indent=2)
-
-    print(f"\n💾 Saved cache-usage-over-time data to: {json_path}")
-
 
 def save_all_beta_results(
     all_results: dict,
@@ -570,12 +561,6 @@ def main() -> None:
     ] + (["TSMTA-Raw"] if run_tsmta else [])
     all_results = make_empty_results(beta_values, alpha_values, save_algo_names)
 
-    # debug
-    # TSMTA per-time-slot cache cost / cache-usage-count, collected per alpha across runs.
-    # cache_usage_runs_by_alpha: dict[str, list[tuple[list[float], list[int]]]] = {
-    #     float_to_tag(alpha): [] for alpha in alpha_values
-    # }
-
     print(f"📌 algos = {algo_names}")
     print(f"📌 sweep_x = {sweep_x}")
     print(f"📌 beta_values = {beta_values}")
@@ -650,32 +635,38 @@ def main() -> None:
                 print("\n--- Build OffPA once ---")
                 T_OffPA = Execute_OffPA(graphs, caches, time_slots, alpha=alpha)
 
+            # TIG/CTIG 不依賴 beta，每個 alpha 只建一次，beta 迴圈內重複使用
+            TIG = CTIG = TIG_Edges_Map = CTIG_Edges_Map = None
+            if run_tsmta:
+                print("\n--- Build TIG/CTIG once per alpha ---")
+                tig_build_start = time.time()
+                TIG, CTIG, TIG_Edges_Map, CTIG_Edges_Map = Build_TIG_CTIG(
+                    graphs,
+                    src_nodes,
+                    caches,
+                    alpha=alpha,
+                )
+                print(f"[TIG/CTIG Build] alpha={alpha}, runtime={time.time() - tig_build_start:.4f}s")
+
             for beta in beta_values:
+                T_TSMTA_base = None
+                tsmta_build_runtime_sec = 0.0
                 if run_tsmta:
-                    print("\n--- Build TSMTA base once ---")
-                    T_TSMTA_base, TIG, TIG_Edges_Map, tsmta_build_runtime_sec = Execute_TSMTA(
-                        graphs,
+                    print("\n--- Select TSMTA tree for this beta ---")
+                    T_TSMTA_base, tsmta_build_runtime_sec = Run_TSMTA_Select(
+                        TIG,
+                        CTIG,
+                        TIG_Edges_Map,
+                        CTIG_Edges_Map,
                         src_nodes,
                         caches,
                         dest_nodes,
                         node_attr_map,
                         time_slots,
                         pdta_level=pdta_level,
-                        alpha=alpha,
-                        beta=beta
+                        beta=beta,
                     )
 
-                    # debug
-                    # cc_per_t 存原始 cache cost（不乘 alpha），與 Excel 的 CC 欄位一致
-                    # cc_per_t, cache_usage_per_t = TVM.CC_multicast_per_time(
-                    #     T_TSMTA_base,
-                    #     src_nodes,
-                    #     caches,
-                    #     time_slots,
-                    #     alpha=1.0,
-                    # )
-                    # cache_usage_runs_by_alpha[float_to_tag(alpha)].append((cc_per_t, cache_usage_per_t))
-                       
                 print("\n" + "-" * 60)
                 print(f"📌 Evaluate beta = {beta}")
                 print(f"\n📌 Evaluate alpha = {alpha} ---")
@@ -717,24 +708,6 @@ def main() -> None:
         num_runs=num_runs,
         sweep_x=sweep_x,
     )
-
-    # debug
-    # Average the per-time-slot cache data across runs for each alpha.
-    # if run_tsmta:
-    #     cache_usage_by_alpha = {}
-    #     for alpha_tag, runs in cache_usage_runs_by_alpha.items():
-    #         cc_matrix = np.array([r[0] for r in runs])
-    #         usage_matrix = np.array([r[1] for r in runs])
-    #         cache_usage_by_alpha[alpha_tag] = {
-    #             "cc_per_t": cc_matrix.mean(axis=0).tolist(),
-    #             "cache_usage_per_t": usage_matrix.mean(axis=0).tolist(),
-    #         }
-
-    #     save_cache_usage_over_time(
-    #         cache_usage_by_alpha=cache_usage_by_alpha,
-    #         cfg=cfg,
-    #         sweep_x=sweep_x,
-    #     )
 
     print("\n🎉 All beta experiments finished!")
 

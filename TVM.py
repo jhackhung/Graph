@@ -40,9 +40,18 @@ def TIG_CTIG(G_sequence: list[nx.DiGraph], srcs: list[str], caches: list[str], a
     for idx, si in enumerate(srcs):
         dists: dict = {}
         parents: dict = {}
+        slot_sp_cost = {}   # t -> {node: cost}
+        slot_sp_path = {}   # t -> {node: path}
         for t, G in enumerate(G_sequence):
             dist, paths = Algorithm.dijkstra_min_edges(G, source=si, weight=TVM.WEIGHT.value)
             dists[t] = {v: cost for v, (cost, hops) in dist.items()}
+            slot_sp_cost[t] = {v: cost for v, (cost, hops) in dist.items()}
+            slot_sp_path[t] = paths
+            # 記錄每個 slot 的 s -> cache 真實路徑，供之後展開虛擬邊使用
+            TIG_Edges_Map[(idx, t)] = {
+                c: paths[c] for c in caches
+                if c in paths and len(paths[c]) >= 2
+            }
             parent = {}
             for v, path in paths.items():
                 if len(path) >= 2:
@@ -64,8 +73,6 @@ def TIG_CTIG(G_sequence: list[nx.DiGraph], srcs: list[str], caches: list[str], a
                 sum_cost = {e: sum_cost[e] for e in current_edges}
                 base_attrs = {e: base_attrs[e] for e in current_edges}
                 for (u, v) in sorted(current_edges, key=lambda e: (str(e[0]), str(e[1]))):
-                    if v in caches and i != j:
-                        continue
                     sum_cost[(u, v)] += float(G_sequence[j][u][v][TVM.WEIGHT.value]) * G_sequence[j].nodes[si]["data_size"]
                 G_j = G_sequence[j]
                 TIG_i_j = nx.DiGraph()
@@ -83,6 +90,36 @@ def TIG_CTIG(G_sequence: list[nx.DiGraph], srcs: list[str], caches: list[str], a
                         attrs["CC"] = 0
                     attrs[TVM.WEIGHT.value] = attrs["BC"] + attrs["CC"]
                     TIG_i_j.add_edge(u, v, **attrs)
+
+                # 虛擬 s->c 邊：讓長區間即使沒有跨 slot 共用的實體 s->c 路徑也可行，
+                # 每個 slot 各走各的最短路徑，事後由 TIG_Edges_Map 展開回實體邊。
+                interval_len = j - i + 1
+                for c in caches:
+                    if not all(c in slot_sp_cost[t] for t in range(i, j + 1)):
+                        continue
+                    bw_cost = sum(
+                        slot_sp_cost[t][c] * G_sequence[t].nodes[si]["data_size"]
+                        for t in range(i, j + 1)
+                    )
+                    cache_cost = sum(
+                        Algorithm.cost_cache(
+                            G_sequence[t].nodes[c],
+                            G_sequence[t].nodes[si]["data_size"],
+                            alpha=alpha,
+                        )
+                        for t in range(i, j + 1)
+                    )
+                    w = (bw_cost + cache_cost) / interval_len
+                    TIG_i_j.add_edge(
+                        si, c,
+                        **{
+                            TVM.WEIGHT.value: w,
+                            "BC": bw_cost / interval_len,
+                            "CC": cache_cost / interval_len,
+                            "virtual": True,
+                        },
+                    )
+
                 TIG_Interval[(idx, i, j)] = TIG_i_j
                 K = nx.DiGraph()
                 K.add_nodes_from((n, dict(attrs)) for n, attrs in TIG_i_j.nodes(data=True))
@@ -116,10 +153,11 @@ def TIG_CTIG(G_sequence: list[nx.DiGraph], srcs: list[str], caches: list[str], a
 def expand_virtual_edges(T_i_t: dict[tuple[int, int], nx.DiGraph], TIG_Interval: dict[tuple[int, int, int], nx.DiGraph], TIG_Edges_Map: dict[tuple[int, int], dict[str, list[str]]], srcs: list[str], caches: list[str], total_time:int):
     for idx, si in enumerate(srcs):
         for t in range(total_time):
+            G_t = T_i_t[(idx, t)]
             for v in caches:
-                if not T_i_t[(idx, t)].has_edge(si, v):
+                if not G_t.has_edge(si, v):
                     continue
-                if not T_i_t[(idx, t)][si][v]["virtual"]:
+                if not G_t[si][v].get("virtual", False):
                     continue
                 key = (idx, t)
                 if key not in TIG_Edges_Map:
@@ -127,35 +165,47 @@ def expand_virtual_edges(T_i_t: dict[tuple[int, int], nx.DiGraph], TIG_Interval:
                 if v not in TIG_Edges_Map[key]:
                     continue
                 real_path = TIG_Edges_Map[key][v]
-                print(f"Virtual edge ({si}->{v}) 展開路徑: {real_path}")
-                T_i_t[(idx, t)].remove_edge(si, v)
+                # print(f"Virtual edge ({si}->{v}) 展開路徑: {real_path}")
+                G_t.remove_edge(si, v)
                 for x, y in zip(real_path, real_path[1:]):
+                    if x not in G_t:
+                        G_t.add_node(x, **TIG_Interval[(idx, t, t)].nodes[x])
+                    if y not in G_t:
+                        G_t.add_node(y, **TIG_Interval[(idx, t, t)].nodes[y])
+
+                    if is_ancestor(G_t, y, x):
+                        # y 是 x 的祖先，接上 x->y 會形成環，這條邊不能加
+                        continue
+
+                    existing_preds = list(G_t.predecessors(y))
+                    if existing_preds:
+                        # y 已有 parent（可能就是 x，或展開路徑併入既有結構），不重複加邊
+                        continue
+
                     if TIG_Interval[(idx, t, t)].has_edge(x, y):
                         edge_attr = TIG_Interval[(idx, t, t)][x][y]
-                        T_i_t[(idx, t)].add_edge(x, y, **edge_attr)
+                        G_t.add_edge(x, y, **edge_attr)
                     else:
                         raise KeyError(
                             f"❌ Edge ({x} -> {y}) not found in TIG_Interval[{idx}, {t}, {t}]"
                         )
 
-def check_no_conflicting_parent(G: nx.DiGraph, label:str):
-    """檢查是否有節點被超過一個 parent 指向，這是環/非樹結構的前兆。"""
-    bad = [n for n in G.nodes() if G.in_degree(n) > 1]
-    if bad:
-        print(f"[STRUCTURE-CHECK] {label}: 發現 in-degree > 1 的節點: {bad[:10]}", flush=True)
-    return bad
-
 def cumulative_cost_to(T: nx.DiGraph, node: str) -> float:
     """從樹的 root 沿著 predecessor chain 走到 node，累加沿途的 BC+CC。"""
     total = 0.0
     v = node
+    seen = set()
     while True:
+        if v in seen:
+            raise AssertionError(f"cumulative_cost_to: 偵測到環，卡在 {v}")
+        seen.add(v)
         preds = list(T.predecessors(v))
         if not preds:
             break
+        if len(preds) > 1:
+            raise AssertionError(f"cumulative_cost_to: {v} 有多個 parent {preds}")
         u = preds[0]
-        edge_attr = T[u][v]
-        total += edge_attr.get("BC", 0.0) + edge_attr.get("CC", 0.0)
+        total += T[u][v].get("BC", 0.0) + T[u][v].get("CC", 0.0)
         v = u
     return total
 
@@ -165,15 +215,60 @@ def is_ancestor(T: nx.DiGraph, ancestor: str, node: str) -> bool:
     seen = set()
     while True:
         if v in seen:
-            return False  # 已經在別處成環，這裡不重複判斷，避免這個檢查自己也無限迴圈
+            raise AssertionError(f"is_ancestor: 偵測到環，node={node} 卡在 {v}")
         seen.add(v)
         preds = list(T.predecessors(v))
         if not preds:
             return False
+        if len(preds) > 1:
+            raise AssertionError(f"is_ancestor: {v} 有多個 parent {preds}，樹不變式已破壞")
         u = preds[0]
         if u == ancestor:
             return True
         v = u
+        
+def union_trees(T_old: nx.DiGraph, T_new: nx.DiGraph, root: str) -> nx.DiGraph:
+    """
+    合併兩棵以 root 為源的樹，保證輸出仍是樹（in-degree <= 1、無環）。
+    parent 衝突時保留「從 root 累積成本較低」的那條，與 T_best 展開段的策略一致。
+    取代跨輪疊加場景的 Algorithm.union_graphs。
+    """
+    if T_old is None or T_old.number_of_nodes() == 0:
+        return T_new.copy()
+    T = T_old.copy()
+
+    # 先補節點屬性（type=dest 等判斷依賴這些 attrs）
+    for n, attrs in T_new.nodes(data=True):
+        if n in T:
+            T.nodes[n].update(attrs)
+        else:
+            T.add_node(n, **attrs)
+
+    if root not in T_new or T_new.number_of_edges() == 0:
+        return T
+
+    # 依 BFS 順序處理 T_new 的邊：保證處理 (x, y) 時 x 已掛在 T 上，cumulative_cost_to(T, x) 才有意義
+    for x, y in nx.bfs_edges(T_new, root):
+        attr = T_new[x][y]
+        preds = list(T.predecessors(y))
+        if preds and preds[0] == x:
+            continue  # 邊已存在
+        if is_ancestor(T, y, x):
+            continue
+        if not preds:
+            T.add_edge(x, y, **attr) # y 還沒有 parent，直接掛上
+            continue
+
+        # parent 衝突：比較兩條路線從 root 到 y 的累積成本
+        old_cost = cumulative_cost_to(T, y)
+        new_cost = (cumulative_cost_to(T, x)
+                    + attr.get("BC", 0.0) + attr.get("CC", 0.0))
+        if new_cost < old_cost:
+            T.remove_edge(preds[0], y)
+            T.add_edge(x, y, **attr)
+        # 否則保留舊 parent；T_new 中 y 的子孫會在後續 BFS 邊
+        # 掛到 y 現在的位置底下，連通性不受影響
+    return T
 
 def TSMTA(
     TIG: dict[tuple[int, int, int], nx.DiGraph],
@@ -192,8 +287,8 @@ def TSMTA(
     def mem_mb():
         return p.memory_info().rss / 1024 / 1024
     T_i_t: dict[tuple[int, int], nx.DiGraph] = {}
-    PDTA_cache = LRUCache(capacity=4096)
-    Choosing_cache = LRUCache(capacity=4096)
+    PDTA_cache = LRUCache(capacity=1024)
+    Choosing_cache = LRUCache(capacity=1024)
     pdta_memo: dict = {} if pdta_level >=3 else None
     pdta_calls = 0
     cache_hits = 0
@@ -212,9 +307,16 @@ def TSMTA(
             for i in range(total_time):
                 local_dests = dests.get((idx, i, i), set())
                 cnt = 0
-                for j in range(i, total_time, 5):
+                for j in range(i, total_time): # 5 去掉
                     local_dests = (local_dests & dests.get((idx, j, j), set()))
                     dcount = len(local_dests)
+                    
+                    # skip condition
+                    interval_len = j - i + 1
+                    lower_bound = beta / interval_len
+                    if (lower_bound >= T_Density_min):
+                        continue
+                    
                     G = CTIG_Interval[(idx, i, j)]
                     sig = Algorithm.graph_signature(G)
                     cache_key = (pdta_level, sig, si, dcount, beta)
@@ -246,12 +348,13 @@ def TSMTA(
                         )
                     else:
                         cnt+=1
-                    if cnt >= 1:
+                    if cnt >= 3:
                         break
                     sorted_records = sorted(records.items(), key=lambda x: x[0])
                     total_dests = sum(key[1] for key, _ in sorted_records)
                     tmp_k = nx.DiGraph()
                     tmp_k_cnt, ptr = 0, 0
+                    no_improve = 0
                     for k in range(1, len(local_dests)):
                         if k > total_dests:
                             break
@@ -271,27 +374,31 @@ def TSMTA(
                                 ptr += 1
                             tmp_min = PDTA.PDTA_Density(tmp_k, beta, local_dests, interval_len=j - i + 1)
                             Choosing_cache[cache_key] = (tmp_k, tmp_min)
-                            if tmp_min < T_Density_min:
-                                if tmp_k.number_of_edges() > 0 and si not in tmp_k:
-                                    raise AssertionError(
-                                        f"[TSMTA] Choosing_cache produced invalid tree without source. "
-                                        f"PDTA_k={pdta_level}, src={si}, interval=({i},{j}), "
-                                        f"k={k}, nodes={list(tmp_k.nodes())[:20]}"
-                                    )
-
-                                T_Density_min, T_best, i_best, t1_best, t2_best = (
-                                    tmp_min,
-                                    tmp_k.copy(),
-                                    idx,
-                                    i,
-                                    j,
+                        if tmp_min < T_Density_min:
+                            if tmp_k.number_of_edges() > 0 and si not in tmp_k:
+                                raise AssertionError(
+                                    f"[TSMTA] Choosing_cache produced invalid tree without source. "
+                                    f"PDTA_k={pdta_level}, src={si}, interval=({i},{j}), "
+                                    f"k={k}, nodes={list(tmp_k.nodes())[:20]}"
                                 )
+                            
+                            T_Density_min, T_best, i_best, t1_best, t2_best = (
+                                tmp_min,
+                                tmp_k.copy(),
+                                idx,
+                                i,
+                                j,
+                            )
+                            no_improve = 0
+                        else:
+                            no_improve += 1
+                        if no_improve >= 3:
+                            break
+                        
         remove = [n for n, d in T_best.nodes(data=True) if d["type"] == TVM.USER.value]
         if len(remove) == 0:
             break 
-        edges_to_process = list(T_best.edges())
-        print(f"[SELECT] interval=({t1_best},{t2_best}), len={t2_best-t1_best+1}, "
-      f"served={len(remove)}, density={T_Density_min:.3f}", flush=True)
+        edges_to_process = list(T_best.edges())        
         for u, v in edges_to_process:
             paths_dict = CTIG_Edges_Map.get((u, t1_best, t2_best), [])
             if v not in paths_dict:
@@ -335,12 +442,8 @@ def TSMTA(
                     raise KeyError(
                         f"❌ Edge ({x} -> {y}) not found in TIG_Interval[{i_best}, {t1_best}, {t2_best}]"
                     )
-        # debug
-        check_no_conflicting_parent(T_best, f"T_best after virtual-edge expansion, interval=({t1_best},{t2_best})")
         for i in range(t1_best, t2_best + 1):
-            T_i_t[(i_best, i)] = Algorithm.union_graphs(T_i_t.get((i_best, i), None), T_best)
-            # debug
-            check_no_conflicting_parent(T_i_t[(i_best, i)], f"T_i_t[({i_best},{i})] after union_graphs")
+            T_i_t[(i_best, i)] = union_trees(T_i_t.get((i_best, i), None), T_best, srcs[i_best])
             for j in range(i, t2_best + 1):
                 key = (i_best, i, j)
                 dests[key] = dests.get(key, set()) - set(remove)
