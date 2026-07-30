@@ -133,3 +133,10 @@ def draw_graph_2d(G: nx.DiGraph, src: str, time: int, attr="cost_traffic"):
 
     plt.axis("off")
     plt.show()
+    
+def check_no_conflicting_parent(G: nx.DiGraph, label:str):
+    """檢查是否有節點被超過一個 parent 指向，這是環/非樹結構的前兆。"""
+    bad = [n for n in G.nodes() if G.in_degree(n) > 1]
+    if bad:
+        print(f"[STRUCTURE-CHECK] {label}: 發現 in-degree > 1 的節點: {bad[:10]}", flush=True)
+    return bad
