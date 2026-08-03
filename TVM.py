@@ -18,14 +18,18 @@ class LRUCache(OrderedDict):
         self.capacity = capacity
     def __getitem__(self, key):
         value = super().__getitem__(key)
-        self.move_to_end(key)
+        try:
+            self.move_to_end(key)
+        except KeyError:
+            pass
         return value
     def __setitem__(self, key, value):
         if key in self:
             self.move_to_end(key)
         super().__setitem__(key, value)
-        if len(self) > self.capacity:
-            self.popitem(last=False)
+        while len(self) > self.capacity:
+            oldest = next(iter(self))
+            del self[oldest]
 INF = float("inf")
 class TVM(Enum):
     WEIGHT = "cost_traffic"
@@ -95,6 +99,8 @@ def TIG_CTIG(G_sequence: list[nx.DiGraph], srcs: list[str], caches: list[str], a
                 # 每個 slot 各走各的最短路徑，事後由 TIG_Edges_Map 展開回實體邊。
                 interval_len = j - i + 1
                 for c in caches:
+                    if TIG_i_j.has_edge(si, c) and not TIG_i_j[si][c].get("virtual", False):
+                        continue
                     if not all(c in slot_sp_cost[t] for t in range(i, j + 1)):
                         continue
                     bw_cost = sum(
@@ -287,18 +293,26 @@ def TSMTA(
     def mem_mb():
         return p.memory_info().rss / 1024 / 1024
     T_i_t: dict[tuple[int, int], nx.DiGraph] = {}
-    PDTA_cache = LRUCache(capacity=1024)
-    Choosing_cache = LRUCache(capacity=1024)
-    pdta_memo: dict = LRUCache(capacity=4096) if pdta_level >= 3 else None
+    PDTA_cache = LRUCache(capacity=256)
+    Choosing_cache = LRUCache(capacity=256)
+    pdta_memo: dict = LRUCache(capacity=256) if pdta_level >= 3 else None
     pdta_calls = 0
     cache_hits = 0
     time_pdta = 0.0
     time_cache = 0.0
     TIG_Interval = {k: v.copy() for k, v in TIG.items()}
     CTIG_Interval = {k: v.copy() for k, v in CTIG.items()}
+    dests_total_entries = sum(len(v) for v in dests.values())
+
+    # graph_version 取代 Algorithm.graph_signature：
+    # CTIG_Interval/TIG_Interval 在本函式內唯一的變動來源是下方把已選中邊的 weight 歸零，
+    # 因此「(idx,i,j) + 歸零次數」已足以唯一識別圖的內容，等價於原本用整張圖 attrs 算出的 signature，
+    # 但省下每次 O(邊數) 的 frozenset 建構與其在 cache key 中的記憶體佔用。
+    graph_version: dict[tuple[int, int, int], int] = {k: 0 for k in CTIG_Interval}
+
     while dests:
         T_best = nx.DiGraph()
-        i_best = 1
+        i_best = 0
         t1_best = 1
         t2_best = 1
         T_Density_min = INF
@@ -318,7 +332,7 @@ def TSMTA(
                         continue
                     
                     G = CTIG_Interval[(idx, i, j)]
-                    sig = Algorithm.graph_signature(G)
+                    sig = (idx, i, j, graph_version[(idx, i, j)])
                     cache_key = (pdta_level, sig, si, dcount, beta)
                     t0 = time.time()
                     if cache_key in PDTA_cache:
@@ -331,6 +345,7 @@ def TSMTA(
                         tmp_k, tmp_min, records = PDTA.PDTA(pdta_level, si, dcount, local_dests, G, interval_len=j - i + 1, _memo=pdta_memo, _sig=sig, beta=beta)
                         time_pdta += time.time() - t0
                         PDTA_cache[cache_key] = (tmp_k, tmp_min, records, beta)
+                        
                     if tmp_min < T_Density_min:
                         if tmp_k.number_of_edges() > 0 and si not in tmp_k:
                             raise AssertionError(
@@ -395,12 +410,12 @@ def TSMTA(
                         if no_improve >= 3:
                             break
                         
-        remove = [n for n, d in T_best.nodes(data=True) if d["type"] == TVM.USER.value]
+        remove = [n for n, d in T_best.nodes(data=True) if d.get("type") == TVM.USER.value]
         if len(remove) == 0:
             break 
         edges_to_process = list(T_best.edges())        
         for u, v in edges_to_process:
-            paths_dict = CTIG_Edges_Map.get((u, t1_best, t2_best), [])
+            paths_dict = CTIG_Edges_Map.get((u, t1_best, t2_best), []) # 預設 n_src = 1
             if v not in paths_dict:
                 continue
             real_path = paths_dict[v]
@@ -449,11 +464,16 @@ def TSMTA(
                 dests[key] = dests.get(key, set()) - set(remove)
                 if not dests[(i_best, i, j)]:
                     del dests[(i_best, i, j)]
+                _changed = False
                 for u, v in T_best.edges():
                     if TIG_Interval[(i_best, i, j)].has_edge(u, v):
                         TIG_Interval[(i_best, i, j)][u][v][TVM.WEIGHT.value] = 0.0
+                        _changed = True
                     if CTIG_Interval[(i_best, i, j)].has_edge(u, v):
                         CTIG_Interval[(i_best, i, j)][u][v][TVM.WEIGHT.value] = 0.0
+                        _changed = True
+                if _changed:
+                    graph_version[(i_best, i, j)] = graph_version.get((i_best, i, j), 0) + 1
     print(f"[{i}] RSS = {mem_mb():.2f} MB")
     print(
         f"[PDTA memo] hits={PDTA.memo_stats['hits']}, "

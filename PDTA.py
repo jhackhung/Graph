@@ -114,12 +114,12 @@ def PDTA(level: int, r: str, m: int, terminals: Set[str], G: nx.DiGraph, interva
     
     use_memo = _memo is not None
     if use_memo:
+        # key 待改成輕量版
         memo_key = (level, r, m, _sig, frozenset(terminals), interval_len, beta)
         if memo_key in _memo:
             memo_stats["hits"] += 1
             cached_T, cached_d, cached_record, cached_beta = _memo[memo_key]
-            if cached_beta == beta:
-                return cached_T.copy(), cached_d, dict(cached_record)
+            return cached_T.copy(), cached_d, dict(cached_record)
         memo_stats["misses"] += 1
     
     result = _PDTA_impl(level, r, m, terminals, G, interval_len, _memo, _sig, beta)
