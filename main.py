@@ -1,4 +1,5 @@
 from datetime import datetime
+import gc
 import json
 import os
 import sys
@@ -459,7 +460,16 @@ def save_all_beta_results(
     cfg: dict,
     num_runs: int,
     sweep_x: str,
+    completed_runs: int | None = None,
 ) -> None:
+    """
+    寫入/更新 Excel。graph_name 固定用目標 num_runs 命名(維持 upsert key 穩定),
+    但 mean/std 統計用 completed_runs(目前已跑完的 run 數),
+    讓中途存檔時可以看到目前累積的平均與標準差。
+    """
+    if completed_runs is None:
+        completed_runs = num_runs
+
     graph_name = get_graph_name(cfg, sweep_x, num_runs)
     pdta_level = int(cfg.get("pdta_level", 2))
 
@@ -467,10 +477,10 @@ def save_all_beta_results(
         for alpha in alpha_values:
             beta_tag = float_to_tag(beta)
             alpha_tag = float_to_tag(alpha)
-            
+
             excel_path = f"{sweep_x}_pdta{pdta_level}_beta_{beta_tag}_alpha_{alpha_tag}.xlsx"
 
-            print(f"\n=== Writing beta={beta} alpha={alpha} results to Excel: {excel_path} ===")
+            print(f"\n=== Writing beta={beta} alpha={alpha} results to Excel: {excel_path} (runs so far: {completed_runs}/{num_runs}) ===")
 
             for algo in algo_names:
                 vals_bc = all_results[beta_tag][alpha_tag][algo]["BC"]
@@ -480,12 +490,15 @@ def save_all_beta_results(
                 vals_build_runtime = all_results[beta_tag][alpha_tag][algo]["Build_Runtime_sec"]
                 vals_beta_runtime = all_results[beta_tag][alpha_tag][algo]["Beta_Runtime_sec"]
 
-                mean_bc, std_bc = calc_mean_std(vals_bc, num_runs)
-                mean_cc, std_cc = calc_mean_std(vals_cc, num_runs)
-                mean_rc, std_rc = calc_mean_std(vals_rc, num_runs)
-                mean_total, std_total = calc_mean_std(vals_total, num_runs)
-                mean_build_runtime, std_build_runtime = calc_mean_std(vals_build_runtime, num_runs)
-                mean_beta_runtime, std_beta_runtime = calc_mean_std(vals_beta_runtime, num_runs)
+                if not vals_bc:
+                    continue
+
+                mean_bc, std_bc = calc_mean_std(vals_bc, completed_runs)
+                mean_cc, std_cc = calc_mean_std(vals_cc, completed_runs)
+                mean_rc, std_rc = calc_mean_std(vals_rc, completed_runs)
+                mean_total, std_total = calc_mean_std(vals_total, completed_runs)
+                mean_build_runtime, std_build_runtime = calc_mean_std(vals_build_runtime, completed_runs)
+                mean_beta_runtime, std_beta_runtime = calc_mean_std(vals_beta_runtime, completed_runs)
 
                 row = {
                     "experiment_id": None,
@@ -508,7 +521,7 @@ def save_all_beta_results(
                     "alpha": float(alpha),
                     "PDTA_k": pdta_level,
                     "base_seed": int(cfg.get("base_seed", 42)),
-                    "num_runs": num_runs,
+                    "num_runs": completed_runs,
                     "Total_Runtime_sec": mean_build_runtime + mean_beta_runtime,
                 }
 
@@ -518,6 +531,49 @@ def save_all_beta_results(
                     f"BC={mean_bc:.2f}, CC={mean_cc:.2f}, "
                     f"RC={mean_rc:.2f}, Total={mean_total:.2f}"
                 )
+
+
+# =========================================================
+# Checkpoint / resume
+# =========================================================
+# 目前 checkpoint path 沒有綁定 base_seed，config 固定 42 開始
+def get_checkpoint_path(cfg: dict, sweep_x: str, algos_spec: str) -> str:
+    """
+    checkpoint path: sweep_x + n_sats/n_dests + pdta_level + algos
+    """
+    pdta_level = int(cfg.get("pdta_level", 2))
+    size_tag = cfg["n_sats"] if sweep_x == "sats" else cfg["n_dests"]
+    algos_tag = str(algos_spec).strip().lower().replace(",", "-")
+    return os.path.join(
+        DIR_PATH,
+        f"checkpoint_{sweep_x}_{size_tag}_pdta{pdta_level}_{algos_tag}.json",
+    )
+
+
+def save_checkpoint(checkpoint_path: str, all_results: dict, completed_runs: int) -> None:
+    """
+    每個 run 結束就把目前累積的原始結果(all_results)連同 completed_runs 存成 JSON。
+    寫入用暫存檔 + rename,避免寫到一半又被砍掉留下半個壞掉的 JSON。
+    """
+    payload = {
+        "completed_runs": completed_runs,
+        "all_results": all_results,
+    }
+    tmp_path = checkpoint_path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f)
+    os.replace(tmp_path, checkpoint_path)
+
+
+def load_checkpoint(checkpoint_path: str) -> tuple[dict | None, int]:
+    """回傳 (all_results, completed_runs);沒有 checkpoint 就回傳 (None, 0)。"""
+    if not os.path.exists(checkpoint_path):
+        return None, 0
+
+    with open(checkpoint_path, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+
+    return payload.get("all_results"), int(payload.get("completed_runs", 0))
 
 
 # =========================================================
@@ -561,6 +617,16 @@ def main() -> None:
     ] + (["TSMTA-Raw"] if run_tsmta else [])
     all_results = make_empty_results(beta_values, alpha_values, save_algo_names)
 
+    checkpoint_path = get_checkpoint_path(cfg, sweep_x, algos_spec)
+    loaded_results, completed_runs = load_checkpoint(checkpoint_path)
+    if loaded_results is not None and completed_runs > 0:
+        all_results = loaded_results
+        print(
+            f"📥 讀到 checkpoint: {checkpoint_path} "
+            f"(已完成 {completed_runs}/{num_runs} runs),將從第 {completed_runs + 1} run 繼續。"
+        )
+    start_run_idx = min(completed_runs, num_runs)
+
     print(f"📌 algos = {algo_names}")
     print(f"📌 sweep_x = {sweep_x}")
     print(f"📌 beta_values = {beta_values}")
@@ -569,7 +635,10 @@ def main() -> None:
     print(f"📌 base_seed = {base_seed}")
     print("核心流程：建樹每個 run 只跑一次；DMTS/OffPA/SSSP 只重算 evaluate；TSMTA 對 copy 跑 Optimal(beta)。")
 
-    for run_idx in range(num_runs):
+    if start_run_idx >= num_runs:
+        print("✅ Checkpoint 顯示所有 run 皆已完成,無需重跑。")
+
+    for run_idx in range(start_run_idx, num_runs):
         current_seed = base_seed + run_idx
         print("\n" + "=" * 70)
         print(f"🚀 Run {run_idx + 1}/{num_runs}, seed={current_seed}")
@@ -699,15 +768,32 @@ def main() -> None:
                         tsmta_build_runtime_sec=tsmta_build_runtime_sec,
                     )
 
-    save_all_beta_results(
-        all_results=all_results,
-        beta_values=beta_values,
-        alpha_values=alpha_values,
-        algo_names=save_algo_names,
-        cfg=cfg,
-        num_runs=num_runs,
-        sweep_x=sweep_x,
-    )
+        # 每個 run 結束就存檔一次,避免長時間實驗中斷時整批結果流失。
+        # 之後每次都以目前已完成的 run 數重算 mean/std 並覆蓋同一列(upsert)。
+        print(f"\n💾 Run {run_idx + 1}/{num_runs} done, saving intermediate results...")
+        save_all_beta_results(
+            all_results=all_results,
+            beta_values=beta_values,
+            alpha_values=alpha_values,
+            algo_names=save_algo_names,
+            cfg=cfg,
+            num_runs=num_runs,
+            sweep_x=sweep_x,
+            completed_runs=run_idx + 1,
+        )
+        save_checkpoint(
+            checkpoint_path=checkpoint_path,
+            all_results=all_results,
+            completed_runs=run_idx + 1,
+        )
+
+        # 釋放此 run 累積的大型物件(graphs/TIG/CTIG/樹等),
+        # 避免 NetworkX DiGraph 的參照循環拖到下個 run 才被回收,
+        # 導致長時間 sweep 記憶體一直往上疊加到被 OOM killer 砍掉。
+        del graphs, TIG, CTIG, TIG_Edges_Map, CTIG_Edges_Map
+        del T_DMTS, T_SSSP, T_OffPA, T_TSMTA_base
+        del src_nodes, dest_nodes_all, dest_nodes, caches, node_attr_map
+        gc.collect()
 
     print("\n🎉 All beta experiments finished!")
 

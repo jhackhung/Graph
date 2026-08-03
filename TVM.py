@@ -289,7 +289,7 @@ def TSMTA(
     T_i_t: dict[tuple[int, int], nx.DiGraph] = {}
     PDTA_cache = LRUCache(capacity=1024)
     Choosing_cache = LRUCache(capacity=1024)
-    pdta_memo: dict = {} if pdta_level >=3 else None
+    pdta_memo: dict = LRUCache(capacity=4096) if pdta_level >= 3 else None
     pdta_calls = 0
     cache_hits = 0
     time_pdta = 0.0
