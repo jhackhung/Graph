@@ -771,21 +771,36 @@ def main() -> None:
         # 每個 run 結束就存檔一次,避免長時間實驗中斷時整批結果流失。
         # 之後每次都以目前已完成的 run 數重算 mean/std 並覆蓋同一列(upsert)。
         print(f"\n💾 Run {run_idx + 1}/{num_runs} done, saving intermediate results...")
-        save_all_beta_results(
-            all_results=all_results,
-            beta_values=beta_values,
-            alpha_values=alpha_values,
-            algo_names=save_algo_names,
-            cfg=cfg,
-            num_runs=num_runs,
-            sweep_x=sweep_x,
-            completed_runs=run_idx + 1,
-        )
         save_checkpoint(
             checkpoint_path=checkpoint_path,
             all_results=all_results,
             completed_runs=run_idx + 1,
         )
+        
+        try:
+            save_all_beta_results(
+                all_results=all_results,
+                beta_values=beta_values,
+                alpha_values=alpha_values,
+                algo_names=save_algo_names,
+                cfg=cfg,
+                num_runs=num_runs,
+                sweep_x=sweep_x,
+                completed_runs=run_idx + 1,
+            )
+        except PermissionError as e:
+            print(
+                f"\nExcel 寫入失敗(檔案可能正被 Excel/IDE 開啟): {e}\n"
+                f"   checkpoint 已存檔(completed_runs={run_idx + 1})\n"
+                f"   關閉該檔案後,下一輪存檔會用完整累積結果補上統計。",
+                flush=True,
+            )
+        except Exception as e:
+            print(
+                f"\nExcel 寫入發生非預期錯誤: {type(e).__name__}: {e}\n"
+                f"   checkpoint 已存檔(completed_runs={run_idx + 1})。",
+                flush=True,
+            )
 
         # 釋放此 run 累積的大型物件(graphs/TIG/CTIG/樹等),
         # 避免 NetworkX DiGraph 的參照循環拖到下個 run 才被回收,

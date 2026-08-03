@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 
 UPSERT_KEYS = ["graph", "algo", "beta", "alpha", "PDTA_k"]
-FAIRNESS_KEYS = ["base_seed", "num_runs"]
+FAIRNESS_KEYS = ["base_seed"] # num_runs 中途存檔時每個 run 都會遞增
 
 def row_matches(df: pd.DataFrame, result_row: dict) -> pd.Series:
     """回傳 boolean mask:df 中與 result_row 的 upsert key 全部相符的 rows。"""
