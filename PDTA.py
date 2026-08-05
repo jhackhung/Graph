@@ -151,8 +151,8 @@ def _PDTA_impl(level: int, r: str, m: int, terminals: Set[str], G: nx.DiGraph, i
         edges_sorted = sorted(
             [
                 (u, v, d)
-                for u, v, d in G.edges(data=True)
-                if u == r and v in T_terminals
+                for u, v, d in G.out_edges(r, data=True)
+                if v in T_terminals
             ],
             key=lambda x: x[2]["cost_traffic"],
             reverse=False
