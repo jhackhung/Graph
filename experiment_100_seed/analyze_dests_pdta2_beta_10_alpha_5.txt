@@ -1,0 +1,88 @@
+[read] dests_pdta2_beta_10_alpha_5.xlsx: 25 rows
+
+========================================================================================================================
+1. TSMTA vs Baselines — 勝率、改善幅度、各成本項 % 差異 (metric = Total)
+   *_diff_pct = (baseline - TSMTA) / |baseline|, 正值代表 TSMTA 較省; CC/RC 已乘上 alpha/beta
+========================================================================================================================
+ PDTA_k  beta  alpha          algo baseline  n_scenarios  wins win_rate mean_improvement median_improvement worst_improvement best_improvement BC_diff_pct CC_diff_pct RC_diff_pct TC_diff_pct
+      2    10      5     TSMTA-Raw     DMTS            5     5  100.00%           32.93%             39.34%             2.62%           48.90%      73.16%           -      59.03%      32.93%
+      2    10      5     TSMTA-Raw     SSSP            5     5  100.00%           33.94%             40.19%             4.24%           49.72%      73.11%           -      59.99%      33.94%
+      2    10      5     TSMTA-Raw    OffPA            5     5  100.00%           99.79%             99.82%            99.66%           99.86%      99.97%    -631.67%       8.30%      99.79%
+      2    10      5 TSMTA-Optimal     DMTS            5     5  100.00%           34.79%             40.76%             6.74%           49.87%      72.97%           -      59.38%      34.79%
+      2    10      5 TSMTA-Optimal     SSSP            5     5  100.00%           35.77%             41.59%             8.30%           50.67%      72.92%           -      60.34%      35.77%
+      2    10      5 TSMTA-Optimal    OffPA            5     5  100.00%           99.80%             99.83%            99.67%           99.86%      99.97%    -595.27%       9.09%      99.80%
+
+========================================================================================================================
+2. TSMTA vs Baselines — 各 dests 逐項 % 差異
+========================================================================================================================
+           graph  beta  alpha  PDTA_k          algo baseline BC_diff_pct CC_diff_pct RC_diff_pct TC_diff_pct
+graph_100_avg100    10      5       2 TSMTA-Optimal     DMTS      49.84%           -      65.69%       6.74%
+graph_100_avg100    10      5       2 TSMTA-Optimal    OffPA      99.95%    -538.54%       9.77%      99.67%
+graph_100_avg100    10      5       2 TSMTA-Optimal     SSSP      49.91%           -      66.48%       8.30%
+graph_100_avg100    10      5       2     TSMTA-Raw     DMTS      50.24%           -      65.18%       2.62%
+graph_100_avg100    10      5       2     TSMTA-Raw    OffPA      99.95%    -584.46%       8.44%      99.66%
+graph_100_avg100    10      5       2     TSMTA-Raw     SSSP      50.31%           -      65.99%       4.24%
+graph_200_avg100    10      5       2 TSMTA-Optimal     DMTS      70.58%           -      60.07%      29.97%
+graph_200_avg100    10      5       2 TSMTA-Optimal    OffPA      99.97%    -598.79%       7.95%      99.79%
+graph_200_avg100    10      5       2 TSMTA-Optimal     SSSP      70.51%           -      60.85%      30.87%
+graph_200_avg100    10      5       2     TSMTA-Raw     DMTS      70.86%           -      60.02%      28.31%
+graph_200_avg100    10      5       2     TSMTA-Raw    OffPA      99.97%    -634.65%       7.83%      99.78%
+graph_200_avg100    10      5       2     TSMTA-Raw     SSSP      70.80%           -      60.80%      29.23%
+graph_300_avg100    10      5       2 TSMTA-Optimal     DMTS      78.27%           -      58.14%      40.76%
+graph_300_avg100    10      5       2 TSMTA-Optimal    OffPA      99.98%    -607.50%       9.00%      99.83%
+graph_300_avg100    10      5       2 TSMTA-Optimal     SSSP      78.18%           -      59.08%      41.59%
+graph_300_avg100    10      5       2     TSMTA-Raw     DMTS      78.40%           -      58.00%      39.34%
+graph_300_avg100    10      5       2     TSMTA-Raw    OffPA      99.98%    -647.99%       8.71%      99.82%
+graph_300_avg100    10      5       2     TSMTA-Raw     SSSP      78.31%           -      58.95%      40.19%
+graph_400_avg100    10      5       2 TSMTA-Optimal     DMTS      82.08%           -      57.04%      46.61%
+graph_400_avg100    10      5       2 TSMTA-Optimal    OffPA      99.98%    -601.74%       9.59%      99.85%
+graph_400_avg100    10      5       2 TSMTA-Optimal     SSSP      81.99%           -      58.10%      47.41%
+graph_400_avg100    10      5       2     TSMTA-Raw     DMTS      82.13%           -      56.43%      45.50%
+graph_400_avg100    10      5       2     TSMTA-Raw    OffPA      99.98%    -628.60%       8.30%      99.85%
+graph_400_avg100    10      5       2     TSMTA-Raw     SSSP      82.05%           -      57.50%      46.32%
+graph_500_avg100    10      5       2 TSMTA-Optimal     DMTS      84.09%           -      55.99%      49.87%
+graph_500_avg100    10      5       2 TSMTA-Optimal    OffPA      99.98%    -629.76%       9.13%      99.86%
+graph_500_avg100    10      5       2 TSMTA-Optimal     SSSP      84.00%           -      57.15%      50.67%
+graph_500_avg100    10      5       2     TSMTA-Raw     DMTS      84.18%           -      55.54%      48.90%
+graph_500_avg100    10      5       2     TSMTA-Raw    OffPA      99.99%    -662.64%       8.21%      99.86%
+graph_500_avg100    10      5       2     TSMTA-Raw     SSSP      84.10%           -      56.72%      49.72%
+
+========================================================================================================================
+3. TSMTA-Optimal vs TSMTA-Raw
+========================================================================================================================
+ PDTA_k  beta  alpha  n_scenarios  wins  ties win_rate mean_improvement median_improvement worst_improvement best_improvement
+      2    10      5            5     5     0  100.00%            2.56%              2.32%             1.89%            4.24%
+
+========================================================================================================================
+3b. TSMTA-Optimal vs TSMTA-Raw — 各 dests 逐項 % 差異
+    *_diff_pct = (Raw - Optimal) / |Raw|,正值代表 Optimal 較省
+========================================================================================================================
+           graph  beta  alpha  PDTA_k BC_diff_pct CC_diff_pct RC_diff_pct TC_diff_pct
+graph_100_avg100    10      5       2      -0.81%       6.71%       1.45%       4.24%
+graph_200_avg100    10      5       2      -0.98%       4.88%       0.13%       2.32%
+graph_300_avg100    10      5       2      -0.59%       5.41%       0.32%       2.34%
+graph_400_avg100    10      5       2      -0.32%       3.69%       1.41%       2.04%
+graph_500_avg100    10      5       2      -0.61%       4.31%       1.00%       1.89%
+
+========================================================================================================================
+4. 成本組成 — BC / alpha*CC / beta*RC 佔 Total 的比例 (各情境比例的平均)
+========================================================================================================================
+ PDTA_k  beta  alpha          algo  n_scenarios BC_share CC_share RC_share
+      2    10      5 TSMTA-Optimal            5   12.73%   42.54%   44.73%
+      2    10      5     TSMTA-Raw            5   12.31%   43.64%   44.05%
+
+========================================================================================================================
+4b. 成本組成 — 各 dests 的 BC / alpha*CC / beta*RC 佔比 (三欄加總為 100%)
+========================================================================================================================
+           graph  beta  alpha  PDTA_k          algo BC_share CC_share RC_share
+graph_100_avg100    10      5       2 TSMTA-Optimal   16.24%   58.08%   25.69%
+graph_100_avg100    10      5       2     TSMTA-Raw   15.43%   59.61%   24.96%
+graph_200_avg100    10      5       2 TSMTA-Optimal   13.45%   47.78%   38.78%
+graph_200_avg100    10      5       2     TSMTA-Raw   13.01%   49.07%   37.93%
+graph_300_avg100    10      5       2 TSMTA-Optimal   12.06%   40.51%   47.44%
+graph_300_avg100    10      5       2     TSMTA-Raw   11.71%   41.82%   46.48%
+graph_400_avg100    10      5       2 TSMTA-Optimal   11.22%   35.21%   53.57%
+graph_400_avg100    10      5       2     TSMTA-Raw   10.95%   35.81%   53.23%
+graph_500_avg100    10      5       2 TSMTA-Optimal   10.71%   31.12%   58.17%
+graph_500_avg100    10      5       2     TSMTA-Raw   10.44%   31.90%   57.65%
+
