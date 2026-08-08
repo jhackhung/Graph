@@ -11,6 +11,7 @@ import numpy as np
 
 from Random_Orbit import generate_graph_sequence_realistic
 from Save_And_Read_Graphs import save_result_to_excel
+import TIG_Cache
 import TVM
 import DMTS
 import OffPA
@@ -602,6 +603,10 @@ def main() -> None:
     sweep_x = sys.argv[2] if len(sys.argv) >= 3 else cfg.get("sweep_x", "sats")
     num_runs = int(cfg.get("num_runs", 1))
     base_seed = int(cfg.get("base_seed", 42))
+    # TIG/CTIG 磁碟快取：預設開啟。設 "use_tig_cache": false 可停用
+    # (例如想量測真實 build runtime、或磁碟空間不足時)。
+    use_tig_cache = bool(cfg.get("use_tig_cache", True))
+    tig_cache_dir = cfg.get("tig_cache_dir", "tig_cache")
     algos_spec = cfg.get("algos", "all")
     if (len(sys.argv) >= 4):
         algos_spec = sys.argv[3]
@@ -633,6 +638,7 @@ def main() -> None:
     print(f"📌 alpha_values = {alpha_values}")
     print(f"📌 num_runs = {num_runs}")
     print(f"📌 base_seed = {base_seed}")
+    print(f"📌 use_tig_cache = {use_tig_cache} (dir={tig_cache_dir})")
     print("核心流程：建樹每個 run 只跑一次；DMTS/OffPA/SSSP 只重算 evaluate；TSMTA 對 copy 跑 Optimal(beta)。")
 
     if start_run_idx >= num_runs:
@@ -704,18 +710,42 @@ def main() -> None:
                 print("\n--- Build OffPA once ---")
                 T_OffPA = Execute_OffPA(graphs, caches, time_slots, alpha=alpha)
 
-            # TIG/CTIG 不依賴 beta，每個 alpha 只建一次，beta 迴圈內重複使用
+            # TIG/CTIG 不依賴 beta，每個 alpha 只建一次，beta 迴圈內重複使用。
+            # 又因為它只由 (seed, topology, alpha) 決定，這裡再加一層磁碟快取，
+            # 讓「換 beta / pdta_level / algos 重跑」時不必重建。
             TIG = CTIG = TIG_Edges_Map = CTIG_Edges_Map = None
             if run_tsmta:
-                print("\n--- Build TIG/CTIG once per alpha ---")
-                tig_build_start = time.time()
-                TIG, CTIG, TIG_Edges_Map, CTIG_Edges_Map = Build_TIG_CTIG(
-                    graphs,
-                    src_nodes,
-                    caches,
-                    alpha=alpha,
-                )
-                print(f"[TIG/CTIG Build] alpha={alpha}, runtime={time.time() - tig_build_start:.4f}s")
+                cached = None
+                if use_tig_cache:
+                    cache_path = TIG_Cache.get_cache_path(
+                        cfg, current_seed, alpha, cache_dir=tig_cache_dir
+                    )
+                    cached = TIG_Cache.load(cache_path, cfg, current_seed, alpha)
+
+                if cached is not None:
+                    TIG, CTIG, TIG_Edges_Map, CTIG_Edges_Map = cached
+                else:
+                    print("\n--- Build TIG/CTIG once per alpha ---")
+                    tig_build_start = time.time()
+                    TIG, CTIG, TIG_Edges_Map, CTIG_Edges_Map = Build_TIG_CTIG(
+                        graphs,
+                        src_nodes,
+                        caches,
+                        alpha=alpha,
+                    )
+                    print(f"[TIG/CTIG Build] alpha={alpha}, runtime={time.time() - tig_build_start:.4f}s")
+
+                    if use_tig_cache:
+                        TIG_Cache.save(
+                            cache_path,
+                            cfg,
+                            current_seed,
+                            alpha,
+                            TIG,
+                            CTIG,
+                            TIG_Edges_Map,
+                            CTIG_Edges_Map,
+                        )
 
             for beta in beta_values:
                 T_TSMTA_base = None
