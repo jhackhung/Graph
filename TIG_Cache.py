@@ -37,7 +37,8 @@ TOPOLOGY_KEYS = [
 ]
 
 # 快取格式版本。TIG_CTIG 的計算邏輯若有變動(權重定義、虛擬邊規則等)需更改
-CACHE_VERSION = 1
+# v2: 修正實體邊誤加 CC 的 bug —— 實體邊只承載 BC,CC 只由虛擬 src->cache 邊承擔。
+CACHE_VERSION = 2
 
 
 def _topology_signature(cfg: dict) -> tuple[str, dict]:

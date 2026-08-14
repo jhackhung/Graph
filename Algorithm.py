@@ -151,6 +151,102 @@ def union_graphs(G1: nx.DiGraph, G2: nx.DiGraph) -> nx.DiGraph:
 
     return G_union
 
+def tree_cumulative_cost_to(T: nx.DiGraph, node: str) -> float:
+    """從樹的 root 沿著 predecessor chain 走到 node，累加沿途的 BC+CC。
+    遇到環或多 parent 時印出警告並回傳 INF，讓呼叫端把該候選視為不可用（不 raise）。"""
+    total = 0.0
+    v = node
+    seen = set()
+    while True:
+        if v in seen:
+            print(f"[WARN] tree_cumulative_cost_to: 偵測到環，卡在 {v}")
+            return float("inf")
+        seen.add(v)
+        preds = list(T.predecessors(v))
+        if not preds:
+            return total
+        if len(preds) > 1:
+            print(f"[WARN] tree_cumulative_cost_to: {v} 有多個 parent {preds}")
+            return float("inf")
+        u = preds[0]
+        total += T[u][v].get("BC", 0.0) + T[u][v].get("CC", 0.0)
+        v = u
+
+def tree_is_ancestor(T: nx.DiGraph, ancestor: str, node: str) -> bool:
+    """檢查 ancestor 是否為 node 的祖先。防禦性版本：遇到已損壞的結構
+    （環／多 parent）時印出警告並回傳 True，等同「不要再加這條邊」，避免惡化。"""
+    v = node
+    seen = set()
+    while True:
+        if v in seen:
+            print(f"[WARN] tree_is_ancestor: 偵測到環，node={node} 卡在 {v}")
+            return True
+        seen.add(v)
+        preds = list(T.predecessors(v))
+        if not preds:
+            return False
+        if len(preds) > 1:
+            print(f"[WARN] tree_is_ancestor: {v} 有多個 parent {preds}，樹不變式已破壞")
+            return True
+        u = preds[0]
+        if u == ancestor:
+            return True
+        v = u
+
+def union_trees_rooted(T_old: nx.DiGraph, T_new: nx.DiGraph, root: str) -> nx.DiGraph:
+    """
+    合併兩棵以 root 為源的樹，保證輸出仍是樹（in-degree <= 1、無環）。
+    parent 衝突時保留「從 root 累積成本較低」的那條。
+    """
+    if T_old is None or T_old.number_of_nodes() == 0:
+        return T_new.copy() if T_new is not None else nx.DiGraph()
+    if T_new is None or T_new.number_of_nodes() == 0:
+        return T_old.copy()
+
+    T = T_old.copy()
+
+    # 先補節點屬性（type=dest 等判斷依賴這些 attrs）
+    for n, attrs in T_new.nodes(data=True):
+        if n in T:
+            T.nodes[n].update(attrs)
+        else:
+            T.add_node(n, **attrs)
+
+    if T_new.number_of_edges() == 0:
+        return T
+
+    # 依 BFS 順序處理，保證處理 (x, y) 時 x 已掛好，成本計算才有意義。
+    # root 不在 T_new 時退回原始邊序（仍有下方的防環檢查把關）。
+    if root in T_new:
+        edge_iter = list(nx.bfs_edges(T_new, root))
+        seen_edges = set(edge_iter)
+        # BFS 走不到的邊（T_new 若非單一連通樹）補在後面
+        edge_iter += [e for e in T_new.edges() if e not in seen_edges]
+    else:
+        edge_iter = list(T_new.edges())
+
+    for x, y in edge_iter:
+        if x == y:
+            continue  # 自環無意義
+        attr = T_new[x][y]
+        preds = list(T.predecessors(y))
+        if preds and preds[0] == x:
+            continue  # 邊已存在
+        if tree_is_ancestor(T, y, x):
+            continue  # 會成環
+        if not preds:
+            T.add_edge(x, y, **attr)  # y 還沒有 parent，直接掛上
+            continue
+
+        # parent 衝突：比較兩條路線從 root 到 y 的累積成本
+        old_cost = tree_cumulative_cost_to(T, y)
+        new_cost = (tree_cumulative_cost_to(T, x)
+                    + attr.get("BC", 0.0) + attr.get("CC", 0.0))
+        if new_cost < old_cost:
+            T.remove_edge(preds[0], y)
+            T.add_edge(x, y, **attr)
+    return T
+
 # paths = {v: reconstruct_path(parent, v) for v in parent}
 def reconstruct_path(parent, target):
     path = []

@@ -14,6 +14,10 @@ def _attach_parent_edge(
     Make a child subtree rooted at v become a valid subtree rooted at r
     by adding r, v, and edge r -> v.
     """
+    # avoid cycle (選到的 root 在 child_tree 中有 parent)
+    if (r in child_tree and child_tree.in_degree(r) > 0):
+        return nx.DiGraph()
+    
     T = child_tree.copy()
 
     if r not in T:
@@ -110,22 +114,22 @@ memo_stats = {"hits": 0, "misses": 0}
 def PDTA(level: int, r: str, m: int, terminals: Set[str], G: nx.DiGraph, interval_len: int = 1, _memo: dict = None, _sig=None, beta: float = 1.0):
     # G 在同一次頂層呼叫內不變，signature 只算一次後沿遞迴往下傳
     if _sig is None:
-        _sig = Algorithm.graph_signature(G)
+        _sig = (id(G), G.number_of_edges())
     
     use_memo = _memo is not None
     if use_memo:
         # key 待改成輕量版
-        memo_key = (level, r, m, _sig, frozenset(terminals), interval_len, beta)
+        memo_key = (level, r, m, _sig, frozenset(terminals))
         if memo_key in _memo:
             memo_stats["hits"] += 1
-            cached_T, cached_d, cached_record, cached_beta = _memo[memo_key]
+            cached_T, cached_d, cached_record = _memo[memo_key]
             return cached_T.copy(), cached_d, dict(cached_record)
         memo_stats["misses"] += 1
     
     result = _PDTA_impl(level, r, m, terminals, G, interval_len, _memo, _sig, beta)
     
     if use_memo:
-        _memo[memo_key] = (result[0].copy(), result[1], dict(result[2]), beta)
+        _memo[memo_key] = (result[0].copy(), result[1], dict(result[2]))
     return result
 
 def _PDTA_impl(level: int, r: str, m: int, terminals: Set[str], G: nx.DiGraph, interval_len: int = 1, _memo: dict = None, _sig = None, beta: float = 1.0):
@@ -242,7 +246,7 @@ def _PDTA_impl(level: int, r: str, m: int, terminals: Set[str], G: nx.DiGraph, i
 
                 while cnt < n and ptr < len(sorted_records):
                     key, G_sub = sorted_records[ptr]
-                    combo = Algorithm.union_graphs(combo, G_sub)
+                    combo = Algorithm.union_trees_rooted(combo, G_sub, v)
                     cnt += key[1]
                     ptr += 1
 
@@ -271,7 +275,8 @@ def _PDTA_impl(level: int, r: str, m: int, terminals: Set[str], G: nx.DiGraph, i
 
         D_current |= D_min
         T_terminals -= D_min
-        T_return = Algorithm.union_graphs(T_return, T_min)
+        # 用保樹版合併：union_graphs 只做邊聯集，k>=3 時會疊出環／多 parent
+        T_return = Algorithm.union_trees_rooted(T_return, T_min, r)
         d_T_min_return = d_T_min
 
         T_record[(d_T_min, len(D_min))] = T_min.copy()

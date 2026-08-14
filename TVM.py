@@ -84,14 +84,7 @@ def TIG_CTIG(G_sequence: list[nx.DiGraph], srcs: list[str], caches: list[str], a
                 for (u, v) in sorted(current_edges, key=lambda e: (str(e[0]), str(e[1]))):
                     attrs = dict(base_attrs[(u, v)])
                     attrs["BC"] = sum_cost[(u, v)] / (j - i + 1)
-                    if v in caches:
-                        attrs["CC"] = Algorithm.cost_cache(
-                            G_sequence[j].nodes[v],
-                            G_sequence[j].nodes[si]["data_size"],
-                            alpha=alpha
-                        )
-                    else:
-                        attrs["CC"] = 0
+                    attrs["CC"] = 0
                     attrs[TVM.WEIGHT.value] = attrs["BC"] + attrs["CC"]
                     TIG_i_j.add_edge(u, v, **attrs)
 
@@ -160,11 +153,14 @@ def expand_virtual_edges(T_i_t: dict[tuple[int, int], nx.DiGraph], TIG_Interval:
     for idx, si in enumerate(srcs):
         for t in range(total_time):
             G_t = T_i_t[(idx, t)]
+            for n in G_t.nodes():
+                G_t.nodes[n].pop("cache_selected", None)
             for v in caches:
                 if not G_t.has_edge(si, v):
                     continue
                 if not G_t[si][v].get("virtual", False):
                     continue
+                G_t.nodes[v]["cache_selected"] = True
                 key = (idx, t)
                 if key not in TIG_Edges_Map:
                     continue
@@ -179,7 +175,7 @@ def expand_virtual_edges(T_i_t: dict[tuple[int, int], nx.DiGraph], TIG_Interval:
                     if y not in G_t:
                         G_t.add_node(y, **TIG_Interval[(idx, t, t)].nodes[y])
 
-                    if is_ancestor(G_t, y, x):
+                    if Algorithm.tree_is_ancestor(G_t, y, x):
                         # y 是 x 的祖先，接上 x->y 會形成環，這條邊不能加
                         continue
 
@@ -195,86 +191,6 @@ def expand_virtual_edges(T_i_t: dict[tuple[int, int], nx.DiGraph], TIG_Interval:
                         raise KeyError(
                             f"❌ Edge ({x} -> {y}) not found in TIG_Interval[{idx}, {t}, {t}]"
                         )
-
-def cumulative_cost_to(T: nx.DiGraph, node: str) -> float:
-    """從樹的 root 沿著 predecessor chain 走到 node，累加沿途的 BC+CC。"""
-    total = 0.0
-    v = node
-    seen = set()
-    while True:
-        if v in seen:
-            raise AssertionError(f"cumulative_cost_to: 偵測到環，卡在 {v}")
-        seen.add(v)
-        preds = list(T.predecessors(v))
-        if not preds:
-            break
-        if len(preds) > 1:
-            raise AssertionError(f"cumulative_cost_to: {v} 有多個 parent {preds}")
-        u = preds[0]
-        total += T[u][v].get("BC", 0.0) + T[u][v].get("CC", 0.0)
-        v = u
-    return total
-
-def is_ancestor(T: nx.DiGraph, ancestor: str, node: str) -> bool:
-    """檢查 ancestor 是否是 node 在目前樹裡（沿 predecessor chain 往上）的祖先。"""
-    v = node
-    seen = set()
-    while True:
-        if v in seen:
-            raise AssertionError(f"is_ancestor: 偵測到環，node={node} 卡在 {v}")
-        seen.add(v)
-        preds = list(T.predecessors(v))
-        if not preds:
-            return False
-        if len(preds) > 1:
-            raise AssertionError(f"is_ancestor: {v} 有多個 parent {preds}，樹不變式已破壞")
-        u = preds[0]
-        if u == ancestor:
-            return True
-        v = u
-        
-def union_trees(T_old: nx.DiGraph, T_new: nx.DiGraph, root: str) -> nx.DiGraph:
-    """
-    合併兩棵以 root 為源的樹，保證輸出仍是樹（in-degree <= 1、無環）。
-    parent 衝突時保留「從 root 累積成本較低」的那條，與 T_best 展開段的策略一致。
-    取代跨輪疊加場景的 Algorithm.union_graphs。
-    """
-    if T_old is None or T_old.number_of_nodes() == 0:
-        return T_new.copy()
-    T = T_old.copy()
-
-    # 先補節點屬性（type=dest 等判斷依賴這些 attrs）
-    for n, attrs in T_new.nodes(data=True):
-        if n in T:
-            T.nodes[n].update(attrs)
-        else:
-            T.add_node(n, **attrs)
-
-    if root not in T_new or T_new.number_of_edges() == 0:
-        return T
-
-    # 依 BFS 順序處理 T_new 的邊：保證處理 (x, y) 時 x 已掛在 T 上，cumulative_cost_to(T, x) 才有意義
-    for x, y in nx.bfs_edges(T_new, root):
-        attr = T_new[x][y]
-        preds = list(T.predecessors(y))
-        if preds and preds[0] == x:
-            continue  # 邊已存在
-        if is_ancestor(T, y, x):
-            continue
-        if not preds:
-            T.add_edge(x, y, **attr) # y 還沒有 parent，直接掛上
-            continue
-
-        # parent 衝突：比較兩條路線從 root 到 y 的累積成本
-        old_cost = cumulative_cost_to(T, y)
-        new_cost = (cumulative_cost_to(T, x)
-                    + attr.get("BC", 0.0) + attr.get("CC", 0.0))
-        if new_cost < old_cost:
-            T.remove_edge(preds[0], y)
-            T.add_edge(x, y, **attr)
-        # 否則保留舊 parent；T_new 中 y 的子孫會在後續 BFS 邊
-        # 掛到 y 現在的位置底下，連通性不受影響
-    return T
 
 def TSMTA(
     TIG: dict[tuple[int, int, int], nx.DiGraph],
@@ -302,7 +218,6 @@ def TSMTA(
     time_cache = 0.0
     TIG_Interval = {k: v.copy() for k, v in TIG.items()}
     CTIG_Interval = {k: v.copy() for k, v in CTIG.items()}
-    dests_total_entries = sum(len(v) for v in dests.values())
 
     # graph_version 取代 Algorithm.graph_signature：
     # CTIG_Interval/TIG_Interval 在本函式內唯一的變動來源是下方把已選中邊的 weight 歸零，
@@ -320,7 +235,7 @@ def TSMTA(
             test_time = time.time()
             for i in range(total_time):
                 local_dests = dests.get((idx, i, i), set())
-                cnt = 0
+                # cnt = 0
                 for j in range(i, total_time): # 5 去掉
                     local_dests = (local_dests & dests.get((idx, j, j), set()))
                     dcount = len(local_dests)
@@ -361,15 +276,15 @@ def TSMTA(
                             i,
                             j,
                         )
-                    else:
-                        cnt+=1
-                    if cnt >= 3:
-                        break
+                    # else:
+                    #     cnt+=1
+                    # if cnt >= 3:
+                    #     break
                     sorted_records = sorted(records.items(), key=lambda x: x[0])
                     total_dests = sum(key[1] for key, _ in sorted_records)
                     tmp_k = nx.DiGraph()
                     tmp_k_cnt, ptr = 0, 0
-                    no_improve = 0
+                    # no_improve = 0
                     for k in range(1, len(local_dests)):
                         if k > total_dests:
                             break
@@ -404,11 +319,11 @@ def TSMTA(
                                 i,
                                 j,
                             )
-                            no_improve = 0
-                        else:
-                            no_improve += 1
-                        if no_improve >= 3:
-                            break
+                            # no_improve = 0
+                        # else:
+                        #     no_improve += 1
+                        # if no_improve >= 3:
+                        #     break
                         
         remove = [n for n, d in T_best.nodes(data=True) if d.get("type") == TVM.USER.value]
         if len(remove) == 0:
@@ -423,6 +338,9 @@ def TSMTA(
                 T_best.remove_edge(u, v)
 
             for x, y in zip(real_path, real_path[1:]):
+                if x == y:
+                    print(f"[WARN] zip 產生自環 pair: x={x}, {u}->{v}, path={real_path}")
+                    continue
                 if x not in T_best:
                     T_best.add_node(x, **node_attr_map.get(x, {}))
                 if y not in T_best:
@@ -430,14 +348,14 @@ def TSMTA(
                     
                 existing_preds = list(T_best.predecessors(y))
                 
-                if is_ancestor(T_best, y, x):
+                if Algorithm.tree_is_ancestor(T_best, y, x):
                     # y 是 x 的祖先，接上 x->y 會形成環，這條邊不能加
                     continue
                 
                 if existing_preds and existing_preds[0] != x:
-                    old_cost = cumulative_cost_to(T_best, y)
+                    old_cost = Algorithm.tree_cumulative_cost_to(T_best, y)
                     new_edge_attr = TIG_Interval[(i_best, t1_best, t2_best)][x][y]
-                    new_cost = cumulative_cost_to(T_best, x) + new_edge_attr.get("BC", 0.0) + new_edge_attr.get("CC", 0.0)
+                    new_cost = Algorithm.tree_cumulative_cost_to(T_best, x) + new_edge_attr.get("BC", 0.0) + new_edge_attr.get("CC", 0.0)
 
                     if new_cost < old_cost:
                         old_pred = existing_preds[0]
@@ -458,7 +376,7 @@ def TSMTA(
                         f"❌ Edge ({x} -> {y}) not found in TIG_Interval[{i_best}, {t1_best}, {t2_best}]"
                     )
         for i in range(t1_best, t2_best + 1):
-            T_i_t[(i_best, i)] = union_trees(T_i_t.get((i_best, i), None), T_best, srcs[i_best])
+            T_i_t[(i_best, i)] = Algorithm.union_trees_rooted(T_i_t.get((i_best, i), None), T_best, srcs[i_best])
             for j in range(i, t2_best + 1):
                 key = (i_best, i, j)
                 dests[key] = dests.get(key, set()) - set(remove)
@@ -562,6 +480,8 @@ def CC_multicast(T_i_t: dict[tuple[int, int], nx.DiGraph],
                 if c not in G.nodes:
                     continue
                 node_attr = G.nodes[c]
+                if not node_attr.get("cache_selected", False):
+                    continue
                 total_cost += Algorithm.cost_cache(node_attr, size, alpha)
 
     return total_cost
@@ -846,6 +766,14 @@ def Optimal(
 ):
     print("Start Optimal")
 
+    for (idx, t), G_t in T_i_t.items():
+        si = srcs[idx]
+        for n in G_t.nodes():
+            G_t.nodes[n].pop("cache_selected", None)
+        for c in caches:
+            if G_t.has_edge(si, c) and G_t[si][c].get("virtual", False):
+                G_t.nodes[c]["cache_selected"] = True
+
     intervals: dict[int, list[tuple[int, int]]] = {}
     G: nx.DiGraph
 
@@ -954,7 +882,7 @@ def Optimal(
                 output=False,
             )
 
-            cache[t1] = T_i_t[(idx, t1)].copy(as_view=False)
+            snapshot = {t: T_i_t[(idx, t)].copy(as_view=False) for t in range(t1, t2 + 1)}
             new_T_i_t = T_i_t[(idx, t1)].copy()
 
             if new_T_i_t.has_edge(path[-2], path[-1]):
@@ -982,6 +910,12 @@ def Optimal(
                     if n in node_attr_map:
                         new_T_i_t.nodes[n].update(node_attr_map[n])
 
+            for n in new_T_i_t.nodes():
+                new_T_i_t.nodes[n].pop("cache_selected", None)
+            for c in caches:
+                if new_T_i_t.has_edge(si, c) and new_T_i_t[si][c].get("virtual", False):
+                    new_T_i_t.nodes[c]["cache_selected"] = True
+
             min_val = total
             l_ch, r_ch = -1, 0
 
@@ -1007,7 +941,7 @@ def Optimal(
                         r_ch = t_r
 
                 for t_r in range(t_l, t2 + 1):
-                    T_i_t[(idx, t_r)] = cache[t1].copy(as_view=False)
+                    T_i_t[(idx, t_r)] = snapshot[t_r].copy(as_view=False)
 
             if min_val < total:
                 for t in range(l_ch, r_ch + 1):

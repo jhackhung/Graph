@@ -16,7 +16,7 @@ import TVM
 import DMTS
 import OffPA
 
-DIR_PATH = "output_graphs"
+DIR_PATH = "output_graphs_dests"
 
 
 # =========================================================
@@ -391,7 +391,7 @@ def evaluate_tsmta_for_beta(
         beta_runtime_sec=0.0,
     )
 
-    T_TSMTA = copy_tree_sequence(T_TSMTA_expanded)
+    T_TSMTA = copy_tree_sequence(T_TSMTA_base)
 
     TVM.Optimal(
         T_TSMTA,
