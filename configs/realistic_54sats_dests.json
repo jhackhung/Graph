@@ -1,6 +1,6 @@
 {
     "start_sats": 300,
-    "start_dests": 50,
+    "start_dests": 100,
     "seed_offset": 1,
     "n_sats": 300,
     "n_clouds": 20,
@@ -14,12 +14,14 @@
     "base_angular_velocity": 0.2,
     "thr_cloud_to_cloud": 3200.0,
     "region_dist_thr": 1000.0,
-    "beta_values": [1],
-    "alpha_values": [1, 10, 50, 100],
-    "pdta_levels": [2],
+    "beta_values": [10],
+    "alpha_values": [5],
+    "pdta_levels": [1, 2],
     "sweep_x": "dests",
-    "num_runs": 1,
+    "num_runs": 100,
     "base_seed": 42,
+    "step_dests": 100,
+    "tig_cache_dir": "tig_cache_dests",
 
     "_comment": 
     [
