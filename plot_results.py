@@ -286,6 +286,17 @@ def load_alpha_excels(excel_paths, fixed_type, fixed_value):
 
     return merged, x_ticks, x_tick_labels
 
+def get_metric_unit_divisor(metric):
+    """CC is displayed in raw units; other metrics are displayed in K."""
+    return 1.0 if metric == "CC" else 1000.0
+
+
+def get_metric_ylabel(metric):
+    if metric == "CC":
+        return metric
+    return f"{metric} (K)"
+
+
 def collect_plot_data(df, metric, x_col, selected_points):
     low_algos = ["DMTS", "TSMTA-Raw", "TSMTA-Optimal", "SSSP"]
     high_algos = ["OffPA"]
@@ -293,6 +304,7 @@ def collect_plot_data(df, metric, x_col, selected_points):
 
     std_col = f"{metric}_Std"
     plot_data = {}
+    divisor = get_metric_unit_divisor(metric)
 
     for algo in algos:
         df_algo = df[df["algo"] == algo].sort_values(x_col)
@@ -303,10 +315,10 @@ def collect_plot_data(df, metric, x_col, selected_points):
             continue
 
         x = df_algo[x_col]
-        y = df_algo[metric] / 1000.0
+        y = df_algo[metric] / divisor
 
         if std_col in df_algo.columns and df_algo[std_col].notna().any():
-            y_err = (df_algo[std_col] / 1000.0).fillna(0.0)
+            y_err = (df_algo[std_col] / divisor).fillna(0.0)
             if (y_err == 0).all():
                 y_err = None
         else:
@@ -371,16 +383,16 @@ def add_top_legend(fig, axes):
         unique.values(),
         unique.keys(),
         loc="upper center",
-        bbox_to_anchor=(0.53, 1.02),
-        ncol=4,
+        bbox_to_anchor=(0.53, 1.03),
+        ncol=3,
         frameon=True,
-        fontsize=19,
-        markerscale=1.5,
-        handlelength=2.5,
-        handletextpad=0.7,
-        columnspacing=1.1,
-        borderpad=0.45,
-        labelspacing=0.4
+        fontsize=17,
+        markerscale=1.3,
+        handlelength=2.2,
+        handletextpad=0.6,
+        columnspacing=1.3,
+        borderpad=0.5,
+        labelspacing=0.6
     )
 
 
@@ -412,6 +424,8 @@ def min_max_with_err(data):
     err = data["y_err"] if data["y_err"] is not None else 0.0
     return (y - err).min(), (y + err).max()
 
+
+
 def plot_metric_normal(
     plot_data,
     metric,
@@ -423,11 +437,11 @@ def plot_metric_normal(
     """Normal y-axis figure."""
     fig, ax = plt.subplots(figsize=(FIG_WIDTH, FIG_HEIGHT))
 
-    low_algos = ["DMTS", "TSMTA-Raw", "TSMTA-Optimal", "SSSP"]
+    low_algos = ["TSMTA-Raw", "TSMTA-Optimal", "DMTS", "SSSP"]
     high_algos = ["OffPA"]
     algos = low_algos + high_algos
 
-    for algo in algos:
+    for draw_order, algo in enumerate(algos):
         if algo not in plot_data:
             continue
 
@@ -441,18 +455,28 @@ def plot_metric_normal(
             capsize=4,
             elinewidth=1.3,
             markeredgewidth=0.9,
+            zorder=10 + draw_order,
             **STYLES[algo]
         )
 
     configure_x_axis(ax, x_ticks, x_tick_labels, x_label)
-    ax.set_ylabel(f"{metric} (K)", labelpad=6)
+    ax.set_ylabel(get_metric_ylabel(metric), labelpad=10)
 
     ax.grid(True, linestyle="--", alpha=0.7)
     ax.tick_params(axis="both", which="major", labelsize=25)
     ax.yaxis.set_major_locator(MaxNLocator(nbins=5))
 
+    all_bounds = [min_max_with_err(plot_data[algo]) for algo in algos if algo in plot_data]
+    if all_bounds:
+        y_min = min(b[0] for b in all_bounds)
+        y_max = max(b[1] for b in all_bounds)
+        y_range = y_max - y_min
+        if y_range == 0:
+            y_range = max(abs(y_max), 1) * 0.1
+        ax.set_ylim(y_min - 0.08 * y_range, y_max + 0.08 * y_range)
+
     add_top_legend(fig, [ax])
-    plt.tight_layout(rect=(0.02, 0.02, 1, 0.93), pad=0.6)
+    plt.tight_layout(rect=(0.02, 0.02, 1, 0.89), pad=0.6)
 
     save_figure(output_path)
 
@@ -480,9 +504,9 @@ def plot_metric_broken(
         }
     )
 
-    low_algos = ["DMTS", "TSMTA-Raw", "TSMTA-Optimal", "SSSP"]
+    low_algos = ["TSMTA-Raw", "TSMTA-Optimal", "DMTS", "SSSP"]
 
-    for algo in low_algos:
+    for draw_order, algo in enumerate(low_algos):
         if algo not in plot_data:
             continue
 
@@ -496,6 +520,7 @@ def plot_metric_broken(
             capsize=4,
             elinewidth=1.3,
             markeredgewidth=0.9,
+            zorder=10 + draw_order,
             **STYLES[algo]
         )
 
@@ -537,7 +562,9 @@ def plot_metric_broken(
     if high_range == 0:
         high_range = max(abs(high_max), 1) * 0.1
 
-    bottom_lower = max(0, low_min - 0.20 * low_range)
+    bottom_lower = low_min - 0.20 * low_range
+    if low_min > 0 and bottom_lower < 0:
+        bottom_lower = 0
     bottom_upper = low_max + 0.25 * low_range
     ax_bottom.set_ylim(bottom_lower, bottom_upper)
 
@@ -555,8 +582,8 @@ def plot_metric_broken(
     configure_x_axis(ax_bottom, x_ticks, x_tick_labels, x_label)
 
     fig.text(
-        0.015, 0.5,
-        f"{metric} (K)",
+        -0.01, 0.5,
+        get_metric_ylabel(metric),
         va="center",
         rotation="vertical",
         fontsize=30
@@ -590,9 +617,169 @@ def plot_metric_broken(
     ax_bottom.plot((1 - d, 1 + d), (1 - d, 1 + d), **kwargs)
 
     add_top_legend(fig, [ax_bottom, ax_top])
-    plt.tight_layout(rect=(0.06, 0.02, 1, 0.93), pad=0.6)
+    plt.tight_layout(rect=(0.06, 0.02, 1, 0.89), pad=0.6)
 
     save_figure(output_path)
+
+
+BAR_ALGO_STYLE = {
+    "TSMTA-Raw": {"color": "salmon", "hatch": "//"},
+    "TSMTA-Optimal": {"color": "red", "hatch": None},
+}
+
+
+def load_scenario_excels(excel_paths, sat_num, dest_num, alpha, beta):
+    """
+    Load one Excel file per PDTA_k and keep only the row matching the exact
+    scenario (sat_num, dest_num, alpha, beta) for TSMTA-Raw / TSMTA-Optimal.
+
+    Each input file must contain a single PDTA_k value (taken from the
+    PDTA_k column). sat_num/dest_num are parsed from the 'graph' column.
+    """
+    frames = []
+
+    for path in excel_paths:
+        if not os.path.exists(path):
+            raise FileNotFoundError(path)
+
+        df = pd.read_excel(path)
+
+        if "PDTA_k" not in df.columns:
+            raise ValueError(f"{os.path.basename(path)} 缺少 PDTA_k 欄位")
+
+        k_values = sorted(df["PDTA_k"].dropna().unique())
+        if len(k_values) != 1:
+            raise ValueError(
+                f"{os.path.basename(path)} 內含多個 PDTA_k 值 {k_values}，每個檔案只能對應一個 K"
+            )
+
+        df = parse_graph_num(df, "graph_num")
+        df = df[
+            (df["graph_num"] == sat_num) | (df["graph_num"] == dest_num)
+        ]
+        df = df[
+            (df["alpha"] == alpha)
+            & (df["beta"] == beta)
+            & (df["algo"].isin(["TSMTA-Raw", "TSMTA-Optimal"]))
+        ]
+
+        if df.empty:
+            print(
+                f"⚠ Warning: {os.path.basename(path)} has no rows matching "
+                f"sats={sat_num}/dests={dest_num}, alpha={alpha}, beta={beta}"
+            )
+            continue
+
+        df["source_file"] = os.path.basename(path)
+        frames.append(df)
+
+    if not frames:
+        raise ValueError(
+            f"No rows found for scenario sats={sat_num}, dests={dest_num}, "
+            f"alpha={alpha}, beta={beta} in any input file."
+        )
+
+    return pd.concat(frames, ignore_index=True)
+
+
+def plot_metric_scenario_bar(
+    df,
+    metric,
+    output_path,
+    k_values,
+):
+    """Bar chart: x groups = K values, bars = TSMTA-Raw / TSMTA-Optimal."""
+    algos = ["TSMTA-Raw", "TSMTA-Optimal"]
+    bar_width = 0.35
+
+    fig, ax = plt.subplots(figsize=(FIG_WIDTH, FIG_HEIGHT))
+
+    x_pos = {k: i for i, k in enumerate(k_values)}
+
+    for algo_idx, algo in enumerate(algos):
+        df_algo = df[df["algo"] == algo].sort_values("PDTA_k")
+        if df_algo.empty:
+            print(f"⚠ Warning: No data for {algo} in {metric}")
+            continue
+
+        offset = (algo_idx - (len(algos) - 1) / 2) * bar_width
+        xs = [x_pos[k] + offset for k in df_algo["PDTA_k"]]
+        ys = df_algo[metric] / get_metric_unit_divisor(metric)
+
+        ax.bar(
+            xs,
+            ys,
+            width=bar_width * 0.95,
+            edgecolor="black",
+            linewidth=0.6,
+            label=algo,
+            **BAR_ALGO_STYLE[algo]
+        )
+
+    ax.set_xticks(list(x_pos.values()))
+    ax.set_xticklabels([f"K={k}" for k in x_pos])
+    ax.set_xlabel("PDTA Level", labelpad=6)
+    ax.set_ylabel(get_metric_ylabel(metric), labelpad=6)
+
+    ax.grid(True, axis="y", linestyle="--", alpha=0.7)
+    ax.tick_params(axis="both", which="major", labelsize=25)
+    ax.yaxis.set_major_locator(MaxNLocator(nbins=5))
+
+    ax.legend(
+        loc="upper center",
+        bbox_to_anchor=(0.5, 1.28),
+        ncol=2,
+        frameon=True,
+        fontsize=19
+    )
+
+    plt.tight_layout(rect=(0.02, 0.02, 1, 0.86), pad=0.6)
+
+    save_figure(output_path)
+
+
+def run_bar_mode(args, base_dir):
+    """
+    --mode bar: single fixed scenario (sats, dests, alpha, beta all fixed),
+    x-axis = PDTA_k in {1, 2, 3} (only K values present in the input files
+    are plotted), bars = TSMTA-Raw vs TSMTA-Optimal.
+    """
+    if args.sats is None or args.dests is None or args.alpha is None or args.beta is None:
+        print("❌ --mode bar requires --sats, --dests, --alpha, and --beta.")
+        sys.exit(1)
+
+    df = load_scenario_excels(
+        excel_paths=args.excel_paths,
+        sat_num=args.sats,
+        dest_num=args.dests,
+        alpha=args.alpha,
+        beta=args.beta
+    )
+
+    k_values = sorted(int(k) for k in df["PDTA_k"].dropna().unique())
+    print(f"📌 PDTA_k values found: {k_values}")
+
+    base_name = f"bar_sats_{args.sats}_dests_{args.dests}_alpha_{args.alpha}_beta_{args.beta}"
+    base_dir += base_name
+    os.makedirs(base_dir, exist_ok=True)
+
+    metrics = ["Total", "BC", "CC", "RC"]
+
+    for metric in metrics:
+        metric_dir = os.path.join(base_dir, metric)
+        os.makedirs(metric_dir, exist_ok=True)
+
+        filename = f"{os.path.basename(base_dir)}_{metric}.png"
+        output_path = os.path.join(metric_dir, filename)
+
+        plot_metric_scenario_bar(
+            df=df,
+            metric=metric,
+            output_path=output_path,
+            k_values=k_values
+        )
+
+    print("🎉 All bar plots generated successfully!")
 
 
 def plot_metric_auto(
@@ -650,8 +837,48 @@ def main():
     parser.add_argument(
         "--x",
         choices=["sats", "dests", "beta", "alpha"],
-        required=True,
-        help="Choose x-axis type: sats, dests, beta, or alpha."
+        required=False,
+        help="Choose x-axis type: sats, dests, beta, or alpha. Not used with --mode bar."
+    )
+
+    parser.add_argument(
+        "--mode",
+        choices=["line", "bar"],
+        default="line",
+        help=(
+            "'line' (default): existing DMTS/TSMTA/SSSP/OffPA line plots (requires --x). "
+            "'bar': single fixed scenario (--sats/--dests/--alpha/--beta), "
+            "x-axis = PDTA_k in {1,2,3}, bars = TSMTA-Raw vs TSMTA-Optimal "
+            "(each excel file must contain exactly one PDTA_k)."
+        )
+    )
+
+    parser.add_argument(
+        "--sats",
+        type=int,
+        default=None,
+        help="Only for --mode bar. Fixed number of satellites, e.g., --sats 300."
+    )
+
+    parser.add_argument(
+        "--dests",
+        type=int,
+        default=None,
+        help="Only for --mode bar. Fixed number of destinations, e.g., --dests 100."
+    )
+
+    parser.add_argument(
+        "--alpha",
+        type=float,
+        default=None,
+        help="Only for --mode bar. Fixed alpha value, e.g., --alpha 10."
+    )
+
+    parser.add_argument(
+        "--beta",
+        type=float,
+        default=None,
+        help="Only for --mode bar. Fixed beta value, e.g., --beta 10."
     )
 
     parser.add_argument(
@@ -703,10 +930,19 @@ def main():
             print(f"❌ File not found: {path}")
             sys.exit(1)
 
+    base_dir = "img_100_graph/"
+
+    if args.mode == "bar":
+        run_bar_mode(args, base_dir)
+        return
+
+    if args.x is None:
+        print("❌ --x is required when --mode line")
+        sys.exit(1)
+
     x_config = get_x_config(args.x)
     x_col = x_config["x_col"]
     x_label = x_config["x_label"]
-    base_dir = "img_dests_beta/"
 
     print(f"📌 X-axis mode: {args.x}")
     print(f"📌 X-axis label: {x_label}")

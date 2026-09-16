@@ -43,7 +43,7 @@ BASE_SEED=$(jq -r '.base_seed // 42' "$CONFIG")
 # 是否清掉舊結果，仍然先放 bash 控制
 # 重新跑完整實驗建議 KEEP=0
 # 補跑才改 KEEP=1
-KEEP=0
+KEEP=1
 
 echo "MODE=$MODE"
 echo "N=$N"
@@ -80,7 +80,7 @@ run_sats() {
     STEP_NSATS=$(jq -r '.step_sats // 50' "$CONFIG")
 
     echo "======================================"
-    echo "開始跑 sats sweep | PDTA k=$PDTA_K"
+    echo "開始跑 sats sweep | PDTA k=$PDTA_K | STEP_NSATS=$STEP_NSATS"
     echo "======================================"
 
     for ((i=1; i<=N; i++))
@@ -120,7 +120,7 @@ run_dests() {
     STEP_NDESTS=$(jq -r '.step_dests // 50' "$CONFIG")
 
     echo "======================================"
-    echo "開始跑 dests sweep | PDTA k=$PDTA_K"
+    echo "開始跑 dests sweep | PDTA k=$PDTA_K | STEP_NDESTS=$STEP_NDESTS" 
     echo "======================================"
 
     for ((i=1; i<=N; i++))

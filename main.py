@@ -16,7 +16,7 @@ import TVM
 import DMTS
 import OffPA
 
-DIR_PATH = "output_graphs_dests"
+DIR_PATH = "output_graphs_sats"
 
 
 # =========================================================
@@ -392,6 +392,11 @@ def evaluate_tsmta_for_beta(
     )
 
     T_TSMTA = copy_tree_sequence(T_TSMTA_base)
+    
+    TVM.expand_virtual_edges(
+        T_i_t=T_TSMTA, TIG_Interval=TIG, TIG_Edges_Map=TIG_Edges_Map,
+        srcs=src_nodes, caches=caches, total_time=time_slots,
+    )
 
     TVM.Optimal(
         T_TSMTA,
@@ -403,15 +408,6 @@ def evaluate_tsmta_for_beta(
         node_attr_map=node_attr_map,
         beta=beta,
         alpha=alpha,
-    )
-
-    TVM.expand_virtual_edges(
-        T_i_t=T_TSMTA,
-        TIG_Interval=TIG,
-        TIG_Edges_Map=TIG_Edges_Map,
-        srcs=src_nodes,
-        caches=caches,
-        total_time=time_slots,
     )
 
     bc, cc, rc, total = TVM.evaluate_algorithm(
