@@ -21,7 +21,11 @@ set -euo pipefail
 
 module purge
 module load miniconda3
+# 非互動式 shell 沒跑過 conda 的 shell hook，直接 `conda activate`
+# 會 command not found。先 source conda.sh 才能用。
+source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate satgraph
+python -c 'import networkx,numpy,pandas,openpyxl' \n    || { echo 'ERROR: conda 環境 satgraph 未就緒或套件缺失' >&2; exit 1; }
 
 cd "$SLURM_SUBMIT_DIR"
 mkdir -p logs

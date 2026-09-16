@@ -78,7 +78,8 @@ def draw_graph(G: nx.DiGraph, src: str, time: int, attr="cost_traffic", elev=25,
 
     # 畫節點標籤
     for n in G.nodes():
-        ax.text(pos[n][0], pos[n][1], pos[n][2], f"{n}, {G.nodes[n]["type"]}", fontsize=8)
+        node_type = G.nodes[n]["type"]
+        ax.text(pos[n][0], pos[n][1], pos[n][2], f"{n}, {node_type}", fontsize=8)
 
     # 畫邊 + 箭頭 + 屬性標籤
     for u, v in G.edges():

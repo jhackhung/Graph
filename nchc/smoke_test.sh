@@ -18,7 +18,11 @@ set -euo pipefail
 
 module purge
 module load miniconda3
+# 非互動式 shell 沒跑過 conda 的 shell hook，`conda activate` 會
+# command not found。先 source conda.sh 才能用 activate。
+source "$(conda info --base 2>/dev/null || echo ${CONDA_PREFIX:-/opt/conda})/etc/profile.d/conda.sh"
 conda activate satgraph
+python -c 'import networkx,numpy,pandas,openpyxl' \n    || { echo 'ERROR: conda 環境 satgraph 未就緒或套件缺失' >&2; exit 1; }
 
 cd "$SLURM_SUBMIT_DIR"
 mkdir -p logs
@@ -49,4 +53,7 @@ echo "=== smoke start $(date -Is) ==="
 /usr/bin/time -v python main.py config.json
 echo "=== smoke done $(date -Is) ==="
 
-ls -la *.xlsx checkpoint_*.json
+echo "--- 產出檔 ---"
+ls -la *.xlsx
+# checkpoint 寫在 main.py 的 DIR_PATH 底下，不是 CWD
+ls -la output_graphs_sats/checkpoint_*.json

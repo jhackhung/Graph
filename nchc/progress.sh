@@ -37,7 +37,7 @@ echo "==================== 完成度 ===================="
 done_n=0
 for ((i = 0; i < N_TASKS; i++)); do
     seed=$((BASE_SEED + i))
-    ckpt=$(ls "${RUNS_DIR}/k3_seed${seed}"/checkpoint_*.json 2>/dev/null | head -n1 || true)
+    ckpt=$(ls "${RUNS_DIR}/k3_seed${seed}"/output_graphs_sats/checkpoint_*.json \n            2>/dev/null | head -n1 || true)
     if [ -n "$ckpt" ] && python -c "
 import json,sys
 try:

@@ -13,6 +13,8 @@
 ## TL;DR
 
 ```bash
+cd /work/$USER/Graph           # 所有指令都在專案目錄下跑
+
 sbatch nchc/smoke_test.sh     # 1. 冒煙測試(ctest,幾分鐘)
 sbatch nchc/probe_k2.sh       # 2. 探測(ct56),量時間與記憶體
                               # 3. 看 probe 結果決定 k=3 是否可行  ← 決策點
@@ -49,7 +51,16 @@ conda activate satgraph
 pip install networkx numpy pandas openpyxl scipy
 ```
 
-### 1. 上傳專案
+### 1. 上傳專案到 /work
+
+**要放在 `/work`，不是 home。**原因見〈該放哪個目錄〉。
+
+先確認你的 work 路徑（通常是 `/work/<帳號>`）：
+
+```bash
+echo $HOME          # /home/u4342858   ← 容量小，不要放這裡
+ls -d /work/$USER   # /work/u4342858   ← 放這裡
+```
 
 `tig_cache_sats/` 裡已經有 seed 42 / n_sats=300 的 TIG cache（約 163 MB），
 一併上傳可以讓該 seed 的 task 直接命中、省下整個 TIG build。
@@ -57,8 +68,18 @@ pip install networkx numpy pandas openpyxl scipy
 ```bash
 rsync -av --exclude='.git' --exclude='__pycache__' \
       --exclude='experiment*' --exclude='img*' --exclude='output_graphs*' \
-      ./ u4342858@t3-login.nchc.org.tw:~/Graph/
+      ./ u4342858@t3-login.nchc.org.tw:/work/u4342858/Graph/
 ```
+
+之後所有指令都在該目錄下執行：
+
+```bash
+cd /work/$USER/Graph
+sbatch nchc/smoke_test.sh
+```
+
+腳本本身用 `$SLURM_SUBMIT_DIR`（Slurm 自動帶入「你送出時所在的目錄」），
+所以放哪裡都能跑，不需要改腳本 —— 只要 `sbatch` 是在專案目錄下執行的。
 
 ### 2. 冒煙測試
 
@@ -69,9 +90,16 @@ rsync -av --exclude='.git' --exclude='__pycache__' \
 sbatch nchc/smoke_test.sh
 ```
 
-跑完檢查 `runs/smoke_seed42/` 底下有沒有出現
-`sats_pdta1_beta_10_alpha_5.xlsx` 與 `checkpoint_*.json`。
-有出現就代表設定正確。
+跑完檢查產出：
+
+```bash
+ls runs/smoke_seed42/*.xlsx
+ls runs/smoke_seed42/output_graphs_sats/checkpoint_*.json
+```
+
+兩者都出現就代表設定正確。
+（checkpoint 寫在 `output_graphs_sats/` 底下，不是工作目錄根部——
+這是 `main.py` 的 `DIR_PATH` 決定的。）
 
 ### 3. 跑 probe（k=2，單 seed）
 
@@ -196,6 +224,33 @@ sbatch --array=$(./nchc/pending_tasks.sh)%20 nchc/run_k3.sh   # 只補這些
 ---
 
 ## 參考
+
+### 該放哪個目錄
+
+放 `/work/$USER/Graph`，不要放 `$HOME`。
+
+| 目錄 | 用途 |
+| --- | --- |
+| `/home/<帳號>` | 配額小，只適合放設定檔、小腳本 |
+| `/work/<帳號>` | 實驗用。配額大、I/O 快，計算節點讀寫效能好 |
+
+這個實驗的產出不小：
+
+- TIG cache 單一檔就 **163 MB**（n_sats=300），多個 seed 累積很快到 GB 級
+- 100 個 `runs/k3_seed*/` 工作目錄，各自有 checkpoint 與 xlsx
+- 100 份 log
+
+放 home 很容易超配額，而磁碟寫不進去時 job 會失敗。
+
+腳本沒有寫死任何絕對路徑，用的是 `$SLURM_SUBMIT_DIR`
+（Slurm 自動帶入你 `sbatch` 時所在的目錄），
+所以專案放哪裡都能跑——**關鍵是 `sbatch` 要在專案目錄下執行**。
+
+把最終結果下載回本機：
+
+```bash
+rsync -av u4342858@t3-login.nchc.org.tw:/work/u4342858/Graph/sats_pdta3_*_merged.xlsx ./
+```
 
 ### 佇列選擇（已用 sinfo 確認）
 
