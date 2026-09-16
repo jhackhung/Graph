@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=sats_k3
+#SBATCH --job-name=sats_k3_probe
 #SBATCH --account=acd109125
 #SBATCH --partition=ct56
 #SBATCH --nodes=1
@@ -7,18 +7,13 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=24G
 #SBATCH --time=4-00:00:00
-#SBATCH --array=0-79%25
-#SBATCH --output=logs/k3_%A_%a.out
-#SBATCH --error=logs/k3_%A_%a.err
+#SBATCH --output=logs/probe_k3_%j.out
+#SBATCH --error=logs/probe_k3_%j.err
 #
-# 100 seed x (300 sats, 100 dests, k=3)
-# 一個 array task = 一個 seed = 一個獨立 process/目錄。
-#
-# ct56 的 QOS 限制：MaxSubmitPU=80（一次最多 80 個 task 進佇列）
-#                    MaxJobsPU=25（同時最多跑 25 個）
-# 所以 100 seed 要分兩批送：
-#   sbatch --array=0-79%25  nchc/run_k3.sh   # seed 42~121
-#   sbatch --array=80-99%25 nchc/run_k3.sh   # seed 122~141（等第一批清空再送）
+# 單 seed / k=3 探測：目的是量出 300 sats 下的
+#   (1) 單 run wall time
+#   (2) peak RSS
+# 這兩個數字用來校正 k=3 正式腳本的 --time 與 --mem。
 
 set -euo pipefail
 
@@ -33,12 +28,13 @@ python -c 'import networkx,numpy,pandas,openpyxl' \n    || { echo 'ERROR: conda 
 cd "$SLURM_SUBMIT_DIR"
 mkdir -p logs
 
-BASE_SEED=42
-SEED=$((BASE_SEED + SLURM_ARRAY_TASK_ID))
+SEED=42
 NSATS=300
 NDESTS=100
-WORKDIR="runs/k3_seed${SEED}"
+WORKDIR="runs/probe_k3_seed${SEED}"
 
+# 不清目錄：k=3 可能要跑很久，若被砍掉重送時
+# main.py 的 checkpoint 能接續，清掉反而浪費已跑的部分。
 mkdir -p "$WORKDIR"
 
 python nchc/make_config.py \
@@ -49,17 +45,17 @@ python nchc/make_config.py \
     --n-dests "$NDESTS" \
     --pdta-level 3 \
     --beta 10 --alpha 5 \
-    --algos all \
+    --algos tsmta \
     --tig-cache-dir "$SLURM_SUBMIT_DIR/tig_cache_sats"
 
+# 每個 task 在自己的目錄下跑：main.py 的 Excel 與 checkpoint 都是
+# 相對 CWD 的固定檔名,換目錄才能避免互相覆蓋。
 cd "$WORKDIR"
 for f in "$SLURM_SUBMIT_DIR"/*.py; do ln -sf "$f" .; done
 
 export PYTHONHASHSEED=$SEED
 export PYTHONUNBUFFERED=1
 
-echo "=== start $(date -Is) | task=$SLURM_ARRAY_TASK_ID seed=$SEED n_sats=$NSATS k=3 ==="
-# 不用 srun：這是單一 task 的串列作業，srun 沒有好處，
-# 反而會因為 SLURM_CPUS_PER_TASK / SLURM_TRES_PER_TASK 不一致而 fatal。
+echo "=== start $(date -Is) | seed=$SEED n_sats=$NSATS k=3 ==="
 /usr/bin/time -v python main.py config.json
-echo "=== done  $(date -Is) | seed=$SEED ==="
+echo "=== done  $(date -Is) ==="

@@ -136,20 +136,28 @@ k=3 在 300 顆的成本目前仍是**外推值**。已知 k=3 的 build 時間�
 看完 probe 的實際時間再決定：直接送、降 seed 數（10~20 個 std 通常就夠穩）、
 或改用更小的 n_sats。
 
-### 5. 送正式實驗
+### 5. 送正式實驗（分兩批）
+
+ct56 的 QOS 上限不允許一次送 100 個 task（見〈QOS 上限〉），
+所以分兩批：
 
 ```bash
-sbatch nchc/run_k3.sh
+sbatch nchc/run_k3.sh                      # 第一批：seed 42~121（80 個）
 ```
 
-**送一次就好。** `--array=0-99%20` 已經把 100 個 task 全部排進佇列，
-`%20` 只是限制同時跑 20 個，其餘 Slurm 會自動遞補。
-
-只想先試幾個 seed，命令列覆蓋即可（不必改檔案）：
+等第一批快跑完（佇列裡剩下的 task 少於 60 個）再送第二批：
 
 ```bash
-sbatch --array=0-4%5 nchc/run_k3.sh     # 只跑 seed 42~46
-sbatch --array=0-99%10 nchc/run_k3.sh   # 併發降到 10
+squeue -u $USER -h | wc -l                 # 先看還剩幾個
+sbatch --array=80-99%25 nchc/run_k3.sh     # 第二批：seed 122~141（20 個）
+```
+
+兩批的 seed 不重疊，合併時會自動收齊。
+
+只想先試幾個 seed，命令列覆蓋即可：
+
+```bash
+sbatch --array=0-4%5 nchc/run_k3.sh        # 只跑 seed 42~46
 ```
 
 ### 6. 合併結果
@@ -250,6 +258,29 @@ sbatch --array=$(./nchc/pending_tasks.sh)%20 nchc/run_k3.sh   # 只補這些
 
 ```bash
 rsync -av u4342858@t3-login.nchc.org.tw:/work/u4342858/Graph/sats_pdta3_*_merged.xlsx ./
+```
+
+### QOS 上限（已用 sacctmgr 確認）
+
+| 佇列 | MaxSubmitPU | MaxJobsPU |
+| --- | --- | --- |
+| `ctest` | 6 | 2 |
+| **`ct56`** | **80** | **25** |
+| `ct224` | 75 | 15 |
+| `ct560` | 45 | 10 |
+
+- **MaxSubmitPU** = 一次最多能有幾個 task 進佇列（含排隊中的）
+- **MaxJobsPU** = 同時最多能跑幾個
+
+所以 `--array=0-99` 會被擋下（100 > 80），需要分批。
+`%25` 則是販齊 MaxJobsPU，寫更大也沒用。
+
+注意這是「所有 ct56 job 加總」，probe 也占名額。
+
+重新確認：
+
+```bash
+sacctmgr show qos format=name,maxsubmitjobsperuser,maxjobsperuser
 ```
 
 ### 佇列選擇（已用 sinfo 確認）
