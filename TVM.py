@@ -150,17 +150,20 @@ def TIG_CTIG(G_sequence: list[nx.DiGraph], srcs: list[str], caches: list[str], a
                 CTIG_Interval[(idx, i, j)] = K
     return TIG_Interval, CTIG_Interval, TIG_Edges_Map, CTIG_Edges_Map
 def expand_virtual_edges(T_i_t: dict[tuple[int, int], nx.DiGraph], TIG_Interval: dict[tuple[int, int, int], nx.DiGraph], TIG_Edges_Map: dict[tuple[int, int], dict[str, list[str]]], srcs: list[str], caches: list[str], total_time:int):
+    cache_selected_by_key: dict[tuple[int,int], set[str]] = {}
     for idx, si in enumerate(srcs):
         for t in range(total_time):
             G_t = T_i_t[(idx, t)]
             for n in G_t.nodes():
                 G_t.nodes[n].pop("cache_selected", None)
+            selected = set()
             for v in caches:
                 if not G_t.has_edge(si, v):
                     continue
                 if not G_t[si][v].get("virtual", False):
                     continue
                 G_t.nodes[v]["cache_selected"] = True
+                selected.add(v)
                 key = (idx, t)
                 if key not in TIG_Edges_Map:
                     continue
@@ -191,6 +194,8 @@ def expand_virtual_edges(T_i_t: dict[tuple[int, int], nx.DiGraph], TIG_Interval:
                         raise KeyError(
                             f"❌ Edge ({x} -> {y}) not found in TIG_Interval[{idx}, {t}, {t}]"
                         )
+            cache_selected_by_key[(idx, t)] = selected
+    return cache_selected_by_key
 
 def TSMTA(
     TIG: dict[tuple[int, int, int], nx.DiGraph],
@@ -209,9 +214,9 @@ def TSMTA(
     def mem_mb():
         return p.memory_info().rss / 1024 / 1024
     T_i_t: dict[tuple[int, int], nx.DiGraph] = {}
-    PDTA_cache = LRUCache(capacity=256)
-    Choosing_cache = LRUCache(capacity=256)
-    pdta_memo: dict = LRUCache(capacity=256) if pdta_level >= 3 else None
+    PDTA_cache = LRUCache(capacity=1024)
+    Choosing_cache = LRUCache(capacity=1024)
+    pdta_memo: dict = LRUCache(capacity=1024) if pdta_level >= 3 else None
     pdta_calls = 0
     cache_hits = 0
     time_pdta = 0.0
@@ -766,13 +771,13 @@ def Optimal(
 ):
     print("Start Optimal")
 
-    for (idx, t), G_t in T_i_t.items():
-        si = srcs[idx]
-        for n in G_t.nodes():
-            G_t.nodes[n].pop("cache_selected", None)
-        for c in caches:
-            if G_t.has_edge(si, c) and G_t[si][c].get("virtual", False):
-                G_t.nodes[c]["cache_selected"] = True
+    # for (idx, t), G_t in T_i_t.items():
+    #     si = srcs[idx]
+    #     for n in G_t.nodes():
+    #         G_t.nodes[n].pop("cache_selected", None)
+    #     for c in caches:
+    #         if G_t.has_edge(si, c) and G_t[si][c].get("virtual", False):
+    #             G_t.nodes[c]["cache_selected"] = True
 
     intervals: dict[int, list[tuple[int, int]]] = {}
     G: nx.DiGraph
@@ -910,11 +915,11 @@ def Optimal(
                     if n in node_attr_map:
                         new_T_i_t.nodes[n].update(node_attr_map[n])
 
-            for n in new_T_i_t.nodes():
-                new_T_i_t.nodes[n].pop("cache_selected", None)
-            for c in caches:
-                if new_T_i_t.has_edge(si, c) and new_T_i_t[si][c].get("virtual", False):
-                    new_T_i_t.nodes[c]["cache_selected"] = True
+            # for n in new_T_i_t.nodes():
+            #     new_T_i_t.nodes[n].pop("cache_selected", None)
+            # for c in caches:
+            #     if new_T_i_t.has_edge(si, c) and new_T_i_t[si][c].get("virtual", False):
+            #         new_T_i_t.nodes[c]["cache_selected"] = True
 
             min_val = total
             l_ch, r_ch = -1, 0

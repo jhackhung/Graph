@@ -137,7 +137,9 @@ def save(
     }
 
     start = time.time()
-    tmp_path = path + ".tmp"
+    # 暫存檔名含 pid：多個 process 同時寫同一個 cache 時不會互相覆寫,
+    # 保住 os.replace 的原子性。
+    tmp_path = f"{path}.{os.getpid()}.tmp"
     try:
         with gzip.open(tmp_path, "wb", compresslevel=compresslevel) as f:
             pickle.dump(blob, f, protocol=pickle.HIGHEST_PROTOCOL)

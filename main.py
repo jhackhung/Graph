@@ -556,7 +556,7 @@ def save_checkpoint(checkpoint_path: str, all_results: dict, completed_runs: int
         "completed_runs": completed_runs,
         "all_results": all_results,
     }
-    tmp_path = checkpoint_path + ".tmp"
+    tmp_path = f"{checkpoint_path}.{os.getpid()}.tmp"
     with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(payload, f)
     os.replace(tmp_path, checkpoint_path)
