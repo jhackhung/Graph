@@ -7,15 +7,18 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=24G
 #SBATCH --time=4-00:00:00
-#SBATCH --array=0-99%20
+#SBATCH --array=0-79%25
 #SBATCH --output=logs/k3_%A_%a.out
 #SBATCH --error=logs/k3_%A_%a.err
 #
 # 100 seed x (300 sats, 100 dests, k=3)
 # 一個 array task = 一個 seed = 一個獨立 process/目錄。
 #
-# --time 與 --mem 請先用 probe_k2.sh 的實測值校正後再送。
-# %20 限制同時併發數：每個 task 峰值記憶體數 GB,開太多會吃爆節點。
+# ct56 的 QOS 限制：MaxSubmitPU=80（一次最多 80 個 task 進佇列）
+#                    MaxJobsPU=25（同時最多跑 25 個）
+# 所以 100 seed 要分兩批送：
+#   sbatch --array=0-79%25  nchc/run_k3.sh   # seed 42~121
+#   sbatch --array=80-99%25 nchc/run_k3.sh   # seed 122~141（等第一批清空再送）
 
 set -euo pipefail
 
