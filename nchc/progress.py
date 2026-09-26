@@ -57,6 +57,20 @@ def seed_status(runs_dir: str, prefix: str, seed: int) -> str:
     return "missing"
 
 
+def discover_seeds(runs_dir: str, prefix: str) -> list[int]:
+    """掃描 runs_dir 底下實際存在的 <prefix><seed> 目錄,取出全部 seed(由小到大)。"""
+    pattern = os.path.join(runs_dir, f"{prefix}*")
+    seed_re = re.compile(re.escape(prefix) + r"(\d+)$")
+    seeds = []
+    for path in glob.glob(pattern):
+        if not os.path.isdir(path):
+            continue
+        m = seed_re.search(os.path.basename(path))
+        if m:
+            seeds.append(int(m.group(1)))
+    return sorted(seeds)
+
+
 def squeue_states(jobid: str | None, user: str) -> Counter | None:
     """回傳 {狀態: 數量};squeue 不存在(例如在本機)時回傳 None。"""
     cmd = ["squeue", "-h", "-o", "%t"]
@@ -100,12 +114,23 @@ def main() -> None:
                     help="只印待跑的 task id(逗號分隔),給 sbatch --array 用")
     args = ap.parse_args()
 
-    seeds = list(range(args.base_seed, args.base_seed + args.n_tasks))
-    statuses = {s: seed_status(args.runs, args.prefix, s) for s in seeds}
-    done = [s for s in seeds if statuses[s] == "done"]
-    timeout_seeds = [s for s in seeds if statuses[s] == "timeout"]
-    missing_seeds = [s for s in seeds if statuses[s] == "missing"]
-    pending_ids = [i for i, s in enumerate(seeds) if statuses[s] != "done"]
+    # 原本要求的 100 個合法 seed(固定範圍),用來算「還缺幾個」與 --pending
+    required_seeds = list(range(args.base_seed, args.base_seed + args.n_tasks))
+    required_set = set(required_seeds)
+
+    # 實際掃描 runs/ 底下存在的所有 seed 目錄,涵蓋超出原本範圍的額外實驗
+    all_seeds = sorted(set(discover_seeds(args.runs, args.prefix)) | required_set)
+    statuses = {s: seed_status(args.runs, args.prefix, s) for s in all_seeds}
+
+    done = [s for s in required_seeds if statuses[s] == "done"]
+    timeout_seeds = [s for s in required_seeds if statuses[s] == "timeout"]
+    missing_seeds = [s for s in required_seeds if statuses[s] == "missing"]
+    pending_ids = [i for i, s in enumerate(required_seeds) if statuses[s] != "done"]
+
+    # 超出原本 100 個範圍、但實際有目錄存在的額外 seed(例如多跑的實驗)
+    extra_seeds = [s for s in all_seeds if s not in required_set]
+    extra_done = [s for s in extra_seeds if statuses[s] == "done"]
+    extra_timeout = [s for s in extra_seeds if statuses[s] == "timeout"]
 
     # --pending: 只輸出 id,方便直接餵給 sbatch
     if args.pending:
@@ -144,6 +169,14 @@ def main() -> None:
         suffix = "" if len(timeout_seeds) <= 20 else f" ...(共 {len(timeout_seeds)} 個)"
         print(f"  timeout(有工作目錄但無合法 checkpoint)的 seed: "
               f"{','.join(str(s) for s in shown)}{suffix}")
+
+    if extra_seeds:
+        print()
+        print("=" * 12, f"範圍外(seed < {args.base_seed} 或 >= {args.base_seed + args.n_tasks})的額外 seed", "=" * 12)
+        print(f"  共 {len(extra_seeds)} 個,完成 {len(extra_done)} 個、timeout {len(extra_timeout)} 個")
+        shown = extra_seeds if len(extra_seeds) <= 20 else extra_seeds[:20]
+        suffix = "" if len(extra_seeds) <= 20 else f" ...(共 {len(extra_seeds)} 個)"
+        print(f"  seed 列表: {','.join(str(s) for s in shown)}{suffix}")
 
     print()
     print("=" * 12, "正在跑的 task 各自做到哪", "=" * 12)
