@@ -19,7 +19,7 @@ sbatch nchc/smoke_test.sh     # 1. 冒煙測試(ctest,幾分鐘)
 sbatch nchc/probe_k2.sh       # 2. 探測(ct56),量時間與記憶體
                               # 3. 看 probe 結果決定 k=3 是否可行  ← 決策點
 sbatch nchc/run_k3.sh         # 4. 正式 100 seed,送一次就好
-./nchc/progress.sh            #    看進度
+python nchc/progress.py       #    看進度
 python nchc/merge_results.py --runs runs \
     --out sats_pdta3_beta_10_alpha_5_merged.xlsx --n-sats 300 --pdta-k 3
 ```
@@ -33,8 +33,7 @@ python nchc/merge_results.py --runs runs \
 | `smoke_test.sh` | 小規模冒煙測試（ctest），確認環境設定正確 |
 | `probe_k2.sh` | 1 seed、k=2 探測，量 wall time 與 peak RSS |
 | `run_k3.sh` | 100 seed、k=3 的 job array |
-| `progress.sh` | 看進度（佇列狀態 + 完成數 + 正在跑的到哪了）|
-| `pending_tasks.sh` | 列出還沒跑完的 task id，用來補送 |
+| `progress.py` | 看進度；`--pending` 列出還沒跑完的 task id |
 | `make_config.py` | 由 base config 產生單一 task 專用的 config |
 | `merge_results.py` | 合併各 seed 的 checkpoint，算出正確的 mean/std |
 
@@ -176,17 +175,26 @@ python nchc/merge_results.py \
 ## 看進度
 
 ```bash
-./nchc/progress.sh            # 全部
-./nchc/progress.sh 1234567    # 指定 JOBID
+python nchc/progress.py                 # 全部
+python nchc/progress.py --job 2105843   # 指定 JOBID
 ```
 
-印三段：佇列狀態、已完成 seed 數、正在跑的 task 各自做到哪。
+印三段：佇列狀態、完成度（進度條）、正在跑的 task 各自做到哪。
+
+常用選項：
+
+| 選項 | 用途 |
+| --- | --- |
+| `--job <id>` | 只看某個 job array |
+| `--n-tasks N` | 總 task 數（預設 100）|
+| `--pending` | 只印待跑的 task id，給 `sbatch --array` 用 |
+| `--runs DIR` | 工作目錄根部（預設 `runs`）|
 
 ### 手動指令
 
 ```bash
 squeue -u $USER                      # R=跑中 PD=排隊
-tail -f logs/k3_<JOBID>_0.out        # 追某個 task 即時輸出
+tail -n 30 logs/k3_<JOBID>_0.out     # 看某個 task 的輸出
 sacct -j <JOBID> --format=JobID,State,Elapsed,MaxRSS,ReqMem   # 跑完看實際用量
 scancel <JOBID>                      # 取消整個 array
 scancel <JOBID>_3                    # 只取消第 3 個 task
@@ -194,32 +202,25 @@ scancel <JOBID>_3                    # 只取消第 3 個 task
 
 `MaxRSS` 是實際記憶體峰值，可用來判斷 `--mem` 開太大還是太小。
 
+> 用 `tail -f` 看已結束的 job 會一直停在那裡等新內容——
+> 檔案其實已經寫完了。看已結束的 job 用 `tail -n 30`（不加 `-f`）。
+
 ### 進度的粒度限制
 
 `main.py` 在**整個 run 跑完後**才寫 checkpoint。每個 task 只跑 1 run，
-所以 checkpoint 對單一 task 只有「沒完成 / 完成了」兩種狀態，沒有中間進度。
-
-想看跑到一半的 task 在做什麼，只能看 log（裡面有 `Build TIG/CTIG`、
-`Evaluate beta=...` 等階段訊息）：
-
-```bash
-tail -n 20 logs/k3_<JOBID>_0.out
-```
-
-k=3 單 run 可能要數十小時，這在判斷「還在跑 vs 卡住了」時很重要。
-
----
+所以 checkpoint 對單一 task 只有「沒完成 / 完成了」兩種狀態。
+想看跑到一半的 task 在做什麼，`progress.py` 的第三段就是從 log 抄出來的。
 
 ## 補送失敗的 seed
 
 job 被砍掉（超時、節點故障）或某些 seed 失敗時，只送沒跑完的：
 
 ```bash
-./nchc/pending_tasks.sh                                       # 先看清單
-sbatch --array=$(./nchc/pending_tasks.sh)%20 nchc/run_k3.sh   # 只補這些
+python nchc/progress.py --pending                    # 先看清單
+sbatch --array=$(python nchc/progress.py --pending)%25 nchc/run_k3.sh
 ```
 
-判斷依據是 `runs/k3_seed<SEED>/` 的 checkpoint：`completed_runs >= 1`
+判斷依據是 `runs/k3_seed<SEED>/output_graphs_sats/` 的 checkpoint：`completed_runs >= 1`
 才算完成，壞掉的 JSON 一律當未完成。
 
 單一 task 的工作目錄彼此獨立，重送不會影響其他 seed。

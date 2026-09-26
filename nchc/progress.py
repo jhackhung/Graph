@@ -48,6 +48,15 @@ def is_done(runs_dir: str, prefix: str, seed: int) -> bool:
     return False
 
 
+def seed_status(runs_dir: str, prefix: str, seed: int) -> str:
+    """回傳該 seed 的狀態:'done' / 'timeout'(有工作目錄但沒跑出合法 checkpoint) / 'missing'(還沒跑過)。"""
+    if is_done(runs_dir, prefix, seed):
+        return "done"
+    if os.path.isdir(seed_dir(runs_dir, prefix, seed)):
+        return "timeout"
+    return "missing"
+
+
 def squeue_states(jobid: str | None, user: str) -> Counter | None:
     """回傳 {狀態: 數量};squeue 不存在(例如在本機)時回傳 None。"""
     cmd = ["squeue", "-h", "-o", "%t"]
@@ -91,9 +100,12 @@ def main() -> None:
                     help="只印待跑的 task id(逗號分隔),給 sbatch --array 用")
     args = ap.parse_args()
 
-    seeds = range(args.base_seed, args.base_seed + args.n_tasks)
-    done = [s for s in seeds if is_done(args.runs, args.prefix, s)]
-    pending_ids = [i for i, s in enumerate(seeds) if s not in set(done)]
+    seeds = list(range(args.base_seed, args.base_seed + args.n_tasks))
+    statuses = {s: seed_status(args.runs, args.prefix, s) for s in seeds}
+    done = [s for s in seeds if statuses[s] == "done"]
+    timeout_seeds = [s for s in seeds if statuses[s] == "timeout"]
+    missing_seeds = [s for s in seeds if statuses[s] == "missing"]
+    pending_ids = [i for i, s in enumerate(seeds) if statuses[s] != "done"]
 
     # --pending: 只輸出 id,方便直接餵給 sbatch
     if args.pending:
@@ -121,8 +133,17 @@ def main() -> None:
     filled = int(bar_len * len(done) / args.n_tasks) if args.n_tasks else 0
     print(f"  [{'#' * filled}{'.' * (bar_len - filled)}] "
           f"{len(done)}/{args.n_tasks} ({pct:.0f}%)")
+    missing_count = args.n_tasks - len(done)
+    if missing_count:
+        print(f"  還缺 {missing_count} 個合法 seed "
+              f"(timeout {len(timeout_seeds)} 個、尚未跑過 {len(missing_seeds)} 個)")
     if pending_ids and len(pending_ids) <= 20:
         print(f"  待跑 task id: {','.join(str(i) for i in pending_ids)}")
+    if timeout_seeds:
+        shown = timeout_seeds if len(timeout_seeds) <= 20 else timeout_seeds[:20]
+        suffix = "" if len(timeout_seeds) <= 20 else f" ...(共 {len(timeout_seeds)} 個)"
+        print(f"  timeout(有工作目錄但無合法 checkpoint)的 seed: "
+              f"{','.join(str(s) for s in shown)}{suffix}")
 
     print()
     print("=" * 12, "正在跑的 task 各自做到哪", "=" * 12)

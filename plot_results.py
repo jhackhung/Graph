@@ -57,7 +57,7 @@ STYLES = {
         "linewidth": 2.6,
         "markersize": 6
     },
-    "TSMTA-Optimal": {
+    "TSMTA-TMTA": {
         "color": "red",
         "marker": "s",
         "linestyle": "--",
@@ -71,7 +71,7 @@ STYLES = {
         "linewidth": 2.0,
         "markersize": 6
     },
-    "SSSP": {
+    "STRUS": {
         "color": "green",
         "marker": "^",
         "linestyle": "-.",
@@ -171,6 +171,19 @@ def infer_fixed_type_from_paths(paths):
     return None
 
 
+# Excel 內 algo 欄位仍是舊名稱，讀入後統一改名再繪圖
+ALGO_RENAME = {
+    "TSMTA-Optimal": "TSMTA-TMTA",
+    "SSSP": "STRUS",
+}
+
+
+def normalize_algo_names(df):
+    if "algo" in df.columns:
+        df["algo"] = df["algo"].replace(ALGO_RENAME)
+    return df
+
+
 def parse_graph_num(df, output_col):
     """
     Parse graph count from graph column.
@@ -186,6 +199,7 @@ def parse_graph_num(df, output_col):
 
 def load_single_excel_for_original_mode(excel_path, x_col):
     df = pd.read_excel(excel_path)
+    df = normalize_algo_names(df)
     df = parse_graph_num(df, x_col)
     return df
 
@@ -208,6 +222,7 @@ def load_beta_excels(excel_paths, fixed_type, fixed_value):
 
         beta = extract_beta_from_path(path)
         df = pd.read_excel(path)
+        df = normalize_algo_names(df)
         df = parse_graph_num(df, fixed_col)
         df["beta"] = beta
         df["source_file"] = os.path.basename(path)
@@ -256,6 +271,7 @@ def load_alpha_excels(excel_paths, fixed_type, fixed_value):
 
         alpha = extract_alpha_from_path(path)
         df = pd.read_excel(path)
+        df = normalize_algo_names(df)
         df = parse_graph_num(df, fixed_col)
         df["alpha"] = alpha
         df["source_file"] = os.path.basename(path)
@@ -298,7 +314,7 @@ def get_metric_ylabel(metric):
 
 
 def collect_plot_data(df, metric, x_col, selected_points):
-    low_algos = ["DMTS", "TSMTA-Raw", "TSMTA-Optimal", "SSSP"]
+    low_algos = ["DMTS", "TSMTA-Raw", "TSMTA-TMTA", "STRUS"]
     high_algos = ["OffPA"]
     algos = low_algos + high_algos
 
@@ -336,12 +352,12 @@ def collect_plot_data(df, metric, x_col, selected_points):
 def should_use_broken_axis(plot_data, break_ratio):
     """
     Use broken y-axis only when OffPA is clearly separated from
-    DMTS / TSMTA-Raw / TSMTA-Optimal / SSSP.
+    DMTS / TSMTA-Raw / TSMTA-TMTA / STRUS.
 
     Condition:
-        min(OffPA) / max(DMTS, TSMTA-Raw, TSMTA-Optimal, SSSP) >= break_ratio
+        min(OffPA) / max(DMTS, TSMTA-Raw, TSMTA-TMTA, STRUS) >= break_ratio
     """
-    low_algos = ["DMTS", "TSMTA-Raw", "TSMTA-Optimal", "SSSP"]
+    low_algos = ["DMTS", "TSMTA-Raw", "TSMTA-TMTA", "STRUS"]
     low_values = []
     high_values = []
 
@@ -437,7 +453,7 @@ def plot_metric_normal(
     """Normal y-axis figure."""
     fig, ax = plt.subplots(figsize=(FIG_WIDTH, FIG_HEIGHT))
 
-    low_algos = ["TSMTA-Raw", "TSMTA-Optimal", "DMTS", "SSSP"]
+    low_algos = ["TSMTA-Raw", "TSMTA-TMTA", "DMTS", "STRUS"]
     high_algos = ["OffPA"]
     algos = low_algos + high_algos
 
@@ -460,7 +476,14 @@ def plot_metric_normal(
         )
 
     configure_x_axis(ax, x_ticks, x_tick_labels, x_label)
-    ax.set_ylabel(get_metric_ylabel(metric), labelpad=10)
+
+    fig.text(
+        -0.01, 0.5,
+        get_metric_ylabel(metric),
+        va="center",
+        rotation="vertical",
+        fontsize=30
+    )
 
     ax.grid(True, linestyle="--", alpha=0.7)
     ax.tick_params(axis="both", which="major", labelsize=25)
@@ -476,7 +499,7 @@ def plot_metric_normal(
         ax.set_ylim(y_min - 0.08 * y_range, y_max + 0.08 * y_range)
 
     add_top_legend(fig, [ax])
-    plt.tight_layout(rect=(0.02, 0.02, 1, 0.89), pad=0.6)
+    plt.tight_layout(rect=(0.06, 0.02, 1, 0.89), pad=0.6)
 
     save_figure(output_path)
 
@@ -491,7 +514,7 @@ def plot_metric_broken(
 ):
     """
     Broken y-axis version:
-    - ax_bottom: DMTS / TSMTA-Raw / TSMTA-Optimal / SSSP
+    - ax_bottom: DMTS / TSMTA-Raw / TSMTA-TMTA / STRUS
     - ax_top: OffPA
     """
     fig, (ax_top, ax_bottom) = plt.subplots(
@@ -504,7 +527,7 @@ def plot_metric_broken(
         }
     )
 
-    low_algos = ["TSMTA-Raw", "TSMTA-Optimal", "DMTS", "SSSP"]
+    low_algos = ["TSMTA-Raw", "TSMTA-TMTA", "DMTS", "STRUS"]
 
     for draw_order, algo in enumerate(low_algos):
         if algo not in plot_data:
@@ -624,14 +647,14 @@ def plot_metric_broken(
 
 BAR_ALGO_STYLE = {
     "TSMTA-Raw": {"color": "salmon", "hatch": "//"},
-    "TSMTA-Optimal": {"color": "red", "hatch": None},
+    "TSMTA-TMTA": {"color": "red", "hatch": None},
 }
 
 
 def load_scenario_excels(excel_paths, sat_num, dest_num, alpha, beta):
     """
     Load one Excel file per PDTA_k and keep only the row matching the exact
-    scenario (sat_num, dest_num, alpha, beta) for TSMTA-Raw / TSMTA-Optimal.
+    scenario (sat_num, dest_num, alpha, beta) for TSMTA-Raw / TSMTA-TMTA.
 
     Each input file must contain a single PDTA_k value (taken from the
     PDTA_k column). sat_num/dest_num are parsed from the 'graph' column.
@@ -643,6 +666,7 @@ def load_scenario_excels(excel_paths, sat_num, dest_num, alpha, beta):
             raise FileNotFoundError(path)
 
         df = pd.read_excel(path)
+        df = normalize_algo_names(df)
 
         if "PDTA_k" not in df.columns:
             raise ValueError(f"{os.path.basename(path)} 缺少 PDTA_k 欄位")
@@ -660,7 +684,7 @@ def load_scenario_excels(excel_paths, sat_num, dest_num, alpha, beta):
         df = df[
             (df["alpha"] == alpha)
             & (df["beta"] == beta)
-            & (df["algo"].isin(["TSMTA-Raw", "TSMTA-Optimal"]))
+            & (df["algo"].isin(["TSMTA-Raw", "TSMTA-TMTA"]))
         ]
 
         if df.empty:
@@ -688,8 +712,8 @@ def plot_metric_scenario_bar(
     output_path,
     k_values,
 ):
-    """Bar chart: x groups = K values, bars = TSMTA-Raw / TSMTA-Optimal."""
-    algos = ["TSMTA-Raw", "TSMTA-Optimal"]
+    """Bar chart: x groups = K values, bars = TSMTA-Raw / TSMTA-TMTA."""
+    algos = ["TSMTA-Raw", "TSMTA-TMTA"]
     bar_width = 0.35
 
     fig, ax = plt.subplots(figsize=(FIG_WIDTH, FIG_HEIGHT))
@@ -717,7 +741,7 @@ def plot_metric_scenario_bar(
         )
 
     ax.set_xticks(list(x_pos.values()))
-    ax.set_xticklabels([f"K={k}" for k in x_pos])
+    ax.set_xticklabels([f"k={k}" for k in x_pos])
     ax.set_xlabel("PDTA Level", labelpad=6)
     ax.set_ylabel(get_metric_ylabel(metric), labelpad=6)
 
@@ -742,7 +766,7 @@ def run_bar_mode(args, base_dir):
     """
     --mode bar: single fixed scenario (sats, dests, alpha, beta all fixed),
     x-axis = PDTA_k in {1, 2, 3} (only K values present in the input files
-    are plotted), bars = TSMTA-Raw vs TSMTA-Optimal.
+    are plotted), bars = TSMTA-Raw vs TSMTA-TMTA.
     """
     if args.sats is None or args.dests is None or args.alpha is None or args.beta is None:
         print("❌ --mode bar requires --sats, --dests, --alpha, and --beta.")
@@ -846,9 +870,9 @@ def main():
         choices=["line", "bar"],
         default="line",
         help=(
-            "'line' (default): existing DMTS/TSMTA/SSSP/OffPA line plots (requires --x). "
+            "'line' (default): existing DMTS/TSMTA/STRUS/OffPA line plots (requires --x). "
             "'bar': single fixed scenario (--sats/--dests/--alpha/--beta), "
-            "x-axis = PDTA_k in {1,2,3}, bars = TSMTA-Raw vs TSMTA-Optimal "
+            "x-axis = PDTA_k in {1,2,3}, bars = TSMTA-Raw vs TSMTA-TMTA "
             "(each excel file must contain exactly one PDTA_k)."
         )
     )
@@ -930,7 +954,7 @@ def main():
             print(f"❌ File not found: {path}")
             sys.exit(1)
 
-    base_dir = "img_100_graph/"
+    base_dir = "img_100_refact/"
 
     if args.mode == "bar":
         run_bar_mode(args, base_dir)
