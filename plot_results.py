@@ -48,6 +48,7 @@ BREAK_RATIO = 5.0
 FIG_WIDTH = 8.8
 FIG_HEIGHT = 6.8
 PNG_DPI = 600
+SAVE_PNG = True  # set to False by --pdf-only
 
 STYLES = {
     "DMTS": {
@@ -395,11 +396,14 @@ def add_top_legend(fig, axes):
 
     unique = dict(zip(labels, handles))
 
-    fig.legend(
+    # Anchor is the legend's lower-center point; its final position is set
+    # by apply_fixed_layout() right above the axes top.
+    return fig.legend(
         unique.values(),
         unique.keys(),
-        loc="upper center",
-        bbox_to_anchor=(0.53, 1.03),
+        loc="lower center",
+        bbox_to_anchor=(0.5, 0.9),
+        borderaxespad=0.0,  # anchor = exact legend bottom edge (layout math relies on it)
         ncol=3,
         frameon=True,
         fontsize=17,
@@ -412,16 +416,206 @@ def add_top_legend(fig, axes):
     )
 
 
-def save_figure(output_path):
-    plt.savefig(output_path, dpi=PNG_DPI, bbox_inches="tight", pad_inches=0.02)
+def get_metric_output_path(base_dir, metric, out_dir=None):
+    """
+    Default: <base_dir>/<metric>/<base_name>_<metric>.png
+    With --out-dir: <out_dir>/<base_name>_<metric>.png (all runs in one folder).
+    """
+    filename = f"{os.path.basename(base_dir)}_{metric}.png"
+    target_dir = out_dir if out_dir else os.path.join(base_dir, metric)
+    os.makedirs(target_dir, exist_ok=True)
+    return os.path.join(target_dir, filename)
+
+
+
+# ===== Fixed layout for line plots (all sizes in inches) =====
+# Every line figure is saved at exactly FIG_WIDTH x FIG_HEIGHT (no bbox_inches="tight"),
+# and the plotting rectangle (single ax, or ax_top + ax_bottom as one block)
+# has the same width / height / top across all metrics. Only `left` may differ.
+LAYOUT_PAD_IN = 0.08        # blank border kept at canvas edges
+YLABEL_GAP_IN = 0.10        # gap between y tick labels and the fig.text ylabel
+LEGEND_GAP_IN = 0.12        # gap between axes-block top and legend bottom
+MIN_RIGHT_MARGIN_IN = 0.30  # right margin of reference (integer-label) figures
+
+
+def add_fig_ylabel(fig, metric):
+    """Shared y label for single / broken axes; placed by apply_fixed_layout()."""
+    return fig.text(
+        0.0, 0.5,
+        get_metric_ylabel(metric),
+        ha="left",
+        va="center",
+        rotation="vertical",
+        fontsize=30
+    )
+
+
+def measure_line_figure(fig_info):
+    """
+    Measure (in inches) how far text sticks out of the axes block, independent
+    of where the block currently is. Tick label / legend sizes only depend on
+    font sizes, so these numbers are stable across layout changes.
+    """
+    fig = fig_info["fig"]
+    axes = fig_info["axes"]
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    dpi = fig.dpi
+
+    boxes = [ax.get_window_extent(renderer) for ax in axes]
+    tights = [ax.get_tightbbox(renderer) for ax in axes]
+
+    block_x0 = min(b.x0 for b in boxes)
+    block_x1 = max(b.x1 for b in boxes)
+    block_y0 = min(b.y0 for b in boxes)
+    block_y1 = max(b.y1 for b in boxes)
+
+    # A figure counts as "decimal" only if its WIDEST y tick label has a '.';
+    # e.g. a broken axis with "2400" on top and "1.5" below is width-limited
+    # by the integer label and must stay a reference figure.
+    ytick_labels = [
+        t
+        for ax in axes
+        for t in ax.yaxis.get_majorticklabels()
+        if t.get_visible() and t.get_text()
+    ]
+    widest_ytick = max(
+        ytick_labels,
+        key=lambda t: t.get_window_extent(renderer).width,
+        default=None
+    )
+
+    ylabel_bb = fig_info["ylabel"].get_window_extent(renderer)
+    legend_bb = fig_info["legend"].get_window_extent(renderer)
+
+    return {
+        "left": (block_x0 - min(t.x0 for t in tights)) / dpi,
+        "right": max(0.0, max(t.x1 for t in tights) - block_x1) / dpi,
+        "bottom": (block_y0 - min(t.y0 for t in tights)) / dpi,
+        "top": max(0.0, max(t.y1 for t in tights) - block_y1) / dpi,
+        "ylabel_w": ylabel_bb.width / dpi,
+        "legend_h": legend_bb.height / dpi,
+        "legend_w": legend_bb.width / dpi,
+        "decimal": widest_ytick is not None and "." in widest_ytick.get_text(),
+    }
+
+
+def compute_shared_layout(measures):
+    """
+    Decide one common axes-block size (W, H) plus common bottom/top, and a
+    per-figure left margin.
+
+    Reference figures = figures whose y tick labels are integers. W is chosen
+    from them alone, so decimal-label figures (e.g. RC) do not shrink the
+    others; a decimal figure just gets a bigger `left` and eats into its own
+    right margin. W is reduced only if that is physically impossible.
+    """
+    bottom_in = LAYOUT_PAD_IN + max(m["bottom"] for m in measures)
+    top_in = (
+        LAYOUT_PAD_IN
+        + max(m["legend_h"] for m in measures)
+        + LEGEND_GAP_IN
+        + max(m["top"] for m in measures)
+    )
+    height_in = FIG_HEIGHT - bottom_in - top_in
+
+    need_left = [
+        LAYOUT_PAD_IN + m["ylabel_w"] + YLABEL_GAP_IN + m["left"]
+        for m in measures
+    ]
+    need_right = [
+        max(MIN_RIGHT_MARGIN_IN, LAYOUT_PAD_IN + m["right"])
+        for m in measures
+    ]
+
+    ref_idx = [i for i, m in enumerate(measures) if not m["decimal"]]
+    if not ref_idx:
+        ref_idx = list(range(len(measures)))
+
+    ref_left = max(need_left[i] for i in ref_idx)
+    width_in = FIG_WIDTH - ref_left - max(need_right[i] for i in ref_idx)
+
+    lefts = [max(ref_left, need) for need in need_left]
+
+    # Wider-label figures shift right; their minimal right margin is only the
+    # real overhang of the last x tick label.
+    for i, left in enumerate(lefts):
+        min_right = LAYOUT_PAD_IN + measures[i]["right"]
+        max_width = FIG_WIDTH - left - min_right
+        if max_width < width_in:
+            print(
+                f"⚠ Axes width reduced {width_in:.3f} -> {max_width:.3f} in "
+                f"so that figure #{i} fits the canvas"
+            )
+            width_in = max_width
+
+    return {
+        "lefts": lefts,
+        "width": width_in,
+        "height": height_in,
+        "bottom": bottom_in,
+        "top": top_in,
+    }
+
+
+def apply_fixed_layout(fig_info, measure, left_in, layout):
+    fig = fig_info["fig"]
+
+    left = left_in / FIG_WIDTH
+    right = (left_in + layout["width"]) / FIG_WIDTH
+    bottom = layout["bottom"] / FIG_HEIGHT
+    top = (layout["bottom"] + layout["height"]) / FIG_HEIGHT
+
+    # subplots_adjust moves the whole gridspec, so ax_top/ax_bottom of the
+    # broken axis keep their height ratio and hspace inside the same block.
+    fig.subplots_adjust(left=left, right=right, bottom=bottom, top=top)
+
+    # Same x for every figure, so the y titles line up when figures sit side by
+    # side; figures with narrower tick labels just get a wider gap.
+    fig_info["ylabel"].set_position((LAYOUT_PAD_IN / FIG_WIDTH, (bottom + top) / 2))
+
+    legend_y = (
+        layout["bottom"] + layout["height"] + measure["top"] + LEGEND_GAP_IN
+    ) / FIG_HEIGHT
+    legend_x = (left + right) / 2
+    half_w = measure["legend_w"] / 2 / FIG_WIDTH
+    legend_x = min(max(legend_x, half_w), 1 - half_w)
+    fig_info["legend"].set_bbox_to_anchor((legend_x, legend_y), transform=fig.transFigure)
+
+
+def save_fixed_figure(fig, output_path):
+    """Save the full canvas; never use bbox_inches='tight' here."""
+    if SAVE_PNG:
+        fig.savefig(output_path, dpi=PNG_DPI)
+        print(f"📊 Saved PNG: {output_path}")
 
     pdf_path = os.path.splitext(output_path)[0] + ".pdf"
-    plt.savefig(pdf_path, bbox_inches="tight", pad_inches=0.02)
+    fig.savefig(pdf_path)
 
-    print(f"📊 Saved PNG: {output_path}")
     print(f"📄 Saved PDF: {pdf_path}")
 
-    plt.close()
+    plt.close(fig)
+
+
+def finalize_line_figures(figures):
+    """Lay out all line figures of one run with a shared geometry, then save."""
+    figures = [f for f in figures if f is not None]
+    if not figures:
+        return
+
+    measures = [measure_line_figure(f) for f in figures]
+    layout = compute_shared_layout(measures)
+
+    for fig_info, measure, left_in in zip(figures, measures, layout["lefts"]):
+        apply_fixed_layout(fig_info, measure, left_in, layout)
+
+    print(
+        f"📐 Shared axes block: {layout['width']:.3f} x {layout['height']:.3f} in, "
+        f"top = {(layout['bottom'] + layout['height']) / FIG_HEIGHT:.4f}"
+    )
+    for fig_info, left_in in zip(figures, layout["lefts"]):
+        print(f"   {fig_info['metric']}: left = {left_in:.3f} in")
+        save_fixed_figure(fig_info["fig"], fig_info["output_path"])
 
 
 def configure_x_axis(ax, x_ticks, x_tick_labels, x_label):
@@ -477,13 +671,7 @@ def plot_metric_normal(
 
     configure_x_axis(ax, x_ticks, x_tick_labels, x_label)
 
-    fig.text(
-        -0.01, 0.5,
-        get_metric_ylabel(metric),
-        va="center",
-        rotation="vertical",
-        fontsize=30
-    )
+    ylabel = add_fig_ylabel(fig, metric)
 
     ax.grid(True, linestyle="--", alpha=0.7)
     ax.tick_params(axis="both", which="major", labelsize=25)
@@ -498,10 +686,18 @@ def plot_metric_normal(
             y_range = max(abs(y_max), 1) * 0.1
         ax.set_ylim(y_min - 0.08 * y_range, y_max + 0.08 * y_range)
 
-    add_top_legend(fig, [ax])
-    plt.tight_layout(rect=(0.06, 0.02, 1, 0.89), pad=0.6)
+    legend = add_top_legend(fig, [ax])
 
-    save_figure(output_path)
+    # Layout and saving are done later by finalize_line_figures(),
+    # so that every metric shares the same canvas / axes size.
+    return {
+        "fig": fig,
+        "axes": [ax],
+        "ylabel": ylabel,
+        "legend": legend,
+        "output_path": output_path,
+        "metric": metric,
+    }
 
 
 def plot_metric_broken(
@@ -604,13 +800,7 @@ def plot_metric_broken(
 
     configure_x_axis(ax_bottom, x_ticks, x_tick_labels, x_label)
 
-    fig.text(
-        -0.01, 0.5,
-        get_metric_ylabel(metric),
-        va="center",
-        rotation="vertical",
-        fontsize=30
-    )
+    ylabel = add_fig_ylabel(fig, metric)
 
     for ax in [ax_top, ax_bottom]:
         ax.grid(True, linestyle="--", alpha=0.7)
@@ -639,10 +829,16 @@ def plot_metric_broken(
     ax_bottom.plot((-d, +d), (1 - d, 1 + d), **kwargs)
     ax_bottom.plot((1 - d, 1 + d), (1 - d, 1 + d), **kwargs)
 
-    add_top_legend(fig, [ax_bottom, ax_top])
-    plt.tight_layout(rect=(0.06, 0.02, 1, 0.89), pad=0.6)
+    legend = add_top_legend(fig, [ax_bottom, ax_top])
 
-    save_figure(output_path)
+    return {
+        "fig": fig,
+        "axes": [ax_top, ax_bottom],
+        "ylabel": ylabel,
+        "legend": legend,
+        "output_path": output_path,
+        "metric": metric,
+    }
 
 
 BAR_ALGO_STYLE = {
@@ -743,23 +939,33 @@ def plot_metric_scenario_bar(
     ax.set_xticks(list(x_pos.values()))
     ax.set_xticklabels([f"k={k}" for k in x_pos])
     ax.set_xlabel("PDTA Level", labelpad=6)
-    ax.set_ylabel(get_metric_ylabel(metric), labelpad=6)
+    ylabel = add_fig_ylabel(fig, metric)
 
     ax.grid(True, axis="y", linestyle="--", alpha=0.7)
     ax.tick_params(axis="both", which="major", labelsize=25)
     ax.yaxis.set_major_locator(MaxNLocator(nbins=5))
 
-    ax.legend(
-        loc="upper center",
-        bbox_to_anchor=(0.5, 1.28),
+    # fig-level legend so finalize_line_figures() can place it like line plots
+    handles, labels = ax.get_legend_handles_labels()
+    legend = fig.legend(
+        handles,
+        labels,
+        loc="lower center",
+        bbox_to_anchor=(0.5, 0.9),
+        borderaxespad=0.0,
         ncol=2,
         frameon=True,
         fontsize=19
     )
 
-    plt.tight_layout(rect=(0.02, 0.02, 1, 0.86), pad=0.6)
-
-    save_figure(output_path)
+    return {
+        "fig": fig,
+        "axes": [ax],
+        "ylabel": ylabel,
+        "legend": legend,
+        "output_path": output_path,
+        "metric": metric,
+    }
 
 
 def run_bar_mode(args, base_dir):
@@ -785,23 +991,22 @@ def run_bar_mode(args, base_dir):
 
     base_name = f"bar_sats_{args.sats}_dests_{args.dests}_alpha_{args.alpha}_beta_{args.beta}"
     base_dir += base_name
-    os.makedirs(base_dir, exist_ok=True)
 
     metrics = ["Total", "BC", "CC", "RC"]
+    figures = []
 
     for metric in metrics:
-        metric_dir = os.path.join(base_dir, metric)
-        os.makedirs(metric_dir, exist_ok=True)
+        output_path = get_metric_output_path(base_dir, metric, args.out_dir)
 
-        filename = f"{os.path.basename(base_dir)}_{metric}.png"
-        output_path = os.path.join(metric_dir, filename)
-
-        plot_metric_scenario_bar(
+        figures.append(plot_metric_scenario_bar(
             df=df,
             metric=metric,
             output_path=output_path,
             k_values=k_values
-        )
+        ))
+
+    # Same fixed-canvas layout as the line plots (shared axes size / top / legend)
+    finalize_line_figures(figures)
 
     print("🎉 All bar plots generated successfully!")
 
@@ -827,7 +1032,7 @@ def plot_metric_auto(
 
     if use_broken:
         print(f"✂ Using broken y-axis for {metric}")
-        plot_metric_broken(
+        return plot_metric_broken(
             plot_data=plot_data,
             metric=metric,
             output_path=output_path,
@@ -837,7 +1042,7 @@ def plot_metric_auto(
         )
     else:
         print(f"📈 Using normal y-axis for {metric}")
-        plot_metric_normal(
+        return plot_metric_normal(
             plot_data=plot_data,
             metric=metric,
             output_path=output_path,
@@ -947,7 +1152,22 @@ def main():
         help="Use broken y-axis only when min(OffPA) / max(other methods) >= this ratio."
     )
 
+    parser.add_argument(
+        "--out-dir",
+        default=None,
+        help="Put every output file directly in this folder (no per-run / per-metric subfolders)."
+    )
+
+    parser.add_argument(
+        "--pdf-only",
+        action="store_true",
+        help="Save PDF only; skip the PNG files."
+    )
+
     args = parser.parse_args()
+
+    global SAVE_PNG
+    SAVE_PNG = not args.pdf_only
 
     for path in args.excel_paths:
         if not os.path.exists(path):
@@ -1042,18 +1262,13 @@ def main():
         # base_dir = f"img/{excel_name}_{args.x}"
         base_dir += f"{excel_name}_{args.x}"
 
-    os.makedirs(base_dir, exist_ok=True)
-
     metrics = ["Total", "BC", "CC", "RC"]
+    figures = []
 
     for metric in metrics:
-        metric_dir = os.path.join(base_dir, metric)
-        os.makedirs(metric_dir, exist_ok=True)
+        output_path = get_metric_output_path(base_dir, metric, args.out_dir)
 
-        filename = f"{os.path.basename(base_dir)}_{metric}.png"
-        output_path = os.path.join(metric_dir, filename)
-
-        plot_metric_auto(
+        fig_info = plot_metric_auto(
             df=df,
             metric=metric,
             output_path=output_path,
@@ -1063,6 +1278,9 @@ def main():
             x_label=x_label,
             break_ratio=args.break_ratio
         )
+        figures.append(fig_info)
+
+    finalize_line_figures(figures)
 
     print("🎉 All plots generated successfully!")
 
