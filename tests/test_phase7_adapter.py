@@ -20,7 +20,7 @@ def built():
     out = {}
     for seed in SEEDS:
         inst, graphs, attrs = from_existing(TINY_CONFIG, seed, n_c=1 + seed % 2, scale=10 ** 5,
-                                            alpha=5, beta=10)
+                                            alpha=5, beta=10, cache_mode="sample")
         sols = {m: from_tsmta_output(inst, graphs, attrs, k=2, mu_mode=m)
                 for m in ("derived", "flag")}
         out[seed] = (inst, graphs, attrs, sols)

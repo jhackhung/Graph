@@ -39,7 +39,7 @@
 
 ## 3. 發現的 repo 與定義差異
 
-1. **TSMTA 輸出的樹常不可行**：1280 列中 189 列（14.8%）。幾乎都是 `UNREACHABLE`（樹含有跟 s 斷開的節點，例如到 cache 的 trunk 沒接上 s），另有 1 列 Optimal 缺 destination。比例隨規模上升（n_sats=8：5%，20：26%），且 β=100 時（20%）高於 β=10 時（9.5%）。最小重現在 `results/tsmta_infeasible/`。**原因未查明**：還沒有在 repo 原始雙向圖上比對，無法排除是單向刪弧或覆寫 cache 集合造成。repo 自己的 BC 計算只從 src 做 DFS，所以這類斷開的弧不會被它計入，問題可能不被 repo 的評估發現。
+1. **TSMTA 輸出的樹常不可行**：1280 列中 189 列（14.8%）。幾乎都是 `UNREACHABLE`（樹含有跟 s 斷開的節點，例如到 cache 的 trunk 沒接上 s），另有 1 列 Optimal 缺 destination。比例隨規模上升（n_sats=8：5%，20：26%），且 β=100 時（20%）高於 β=10 時（9.5%）。最小重現在 `results/tsmta_infeasible/`。**成因已查明（Phase 13）**：TSMTA 把各條 CTIG／虛擬 s→c 邊獨立展開成最短路徑再併成一棵樹，路徑對同一節點的上下游方向不一致時，「已有 parent 就跳過」與「成環就跳過」兩條防護會丟掉唯一接回 s 的邊，cache 成為孤兒，底下的子樹斷開（480 個實例中 60 個失敗，全部符合此機制；選樹階段 18、展開虛擬邊階段 42）。在 repo 原始未刪弧的圖上同樣發生（n_sats=20：6/10 個 run 有斷開的 slot），所以不是單向刪弧或覆寫 cache 集合造成。repo 的 TSMTA 評估器（`BC_multicast_cache_aware` 只從 src 做 DFS、無可達性檢查）看不到這類斷開，成本因此被低估；SSSP／DMTS 沒有此問題（40 個 slot 全連通）。adapter 端修補（`repair_connectivity`，`from_tsmta_output(repair=True)`）後 Raw、Optimal 的不可行都降到 0（另有 1 列 `VIRTUAL_EDGE_LEFT` 無法修補），修補後近似比平均 1.289、最大 6.286（含修補，非論文 TSMTA 的近似比）。詳見 PROGRESS.md Phase 13。
 2. `main.Build_TIG_CTIG` 忽略傳入的 `caches` 參數，改讀 `graphs[0]` 的 `cache` 節點屬性；adapter 因此在複製的圖上改寫該屬性。
 3. 沿用 `ILP_reuse_report.md` 的 D1–D6、D14（BC 0.3 折扣、RC 取平均、origin 判斷、Optimal 後旗標遺失、儲存權重等）：新 evaluator 不使用它們，`evaluate_repo_compat` 能完全重現 repo 數字（Raw 79.8572、Optimal 70.6078），確認我們讀懂了 repo 的定義。
 4. 量化：S=10^5 時最大相對誤差 6.9e-5（報告 D10 估計 1.6e-5；此處弧權重更小，原因為推測）。
@@ -64,7 +64,7 @@
 
 - DEC-1 至 DEC-7 全部採 PLAN 預設值，皆待確認：origin 可為任意 μ=1 祖先、C 只含衛星、每 slot 強制為樹、BC 無 0.3 折扣且 RC 為總和、μ 的推導規則、S 與 (α,β) 組合、時限 600 s。
 - Fig. 1 的 g（快取成本）與 v 鏈弧權重；Example 1 的 +1／+3 不一致。
-- 是否要追查 TSMTA 不可行解的成因（先在雙向原圖上重現），以及這些列在論文實驗中如何處理。
+- TSMTA 不可行解：成因已查明並在 adapter 端修補（Phase 13）。待決定：論文實驗中這些輸出如何處理；是否把修補或可達性檢查放進 repo 的 `TVM.py`／評估器（會改變既有圖表數字）；論文規模下 TSMTA 成本被低估的幅度。
 - 是否把 `.venv_ilp/` 加進 `.gitignore`（PLAN 規定不改既有檔案，所以我沒動；`results*` 已被既有規則忽略）。
 
 ## 6. 重現指令（repo 根目錄）

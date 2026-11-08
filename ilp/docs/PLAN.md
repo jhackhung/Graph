@@ -79,7 +79,7 @@ TC = BC + alpha·CC + beta·RC
 | 編號 | 決策 | 預設 |
 |---|---|---|
 | DEC-1 | origin 可為任意 μ=1 的祖先（不強制最近）。此為論文「path 從 source 或儲存 a^t 的 cache 出發」的直接讀法，且讓 ILP 與暴力法可精確對拍 | 如左 |
-| DEC-2 | C 只含衛星；小圖用 `n_clouds=0`，`|C|` 由 adapter 以固定 seed 抽 1–2 個 | 如左 |
+| DEC-2 | **cloud 算 cache，與 repo 一致（使用者已確認）**：C = repo 圖上 `cache` 屬性為 True 的節點（全部 cloud + 被標為 cache 的衛星），adapter 不改寫圖屬性、同一份 C 傳給所有演算法（`cache_mode="repo"`，預設）。舊作法（`cache_mode="sample"`：C 只含衛星、`n_clouds=0`、`\|C\|` 由 adapter 抽 1–2 個）僅供回歸對照 | 如左 |
 | DEC-3 | 每 slot 強制為樹（入度 ≤ 1） | 如左；另提供 `enforce_tree=False` 選項當下界 |
 | DEC-4 | BC 無 0.3 折扣、RC 為總和 | 如左（若論文實驗實際用 repo 定義，使用者自行處理） |
 | DEC-5 | μ 的推導規則（TSMTA 解轉換用）：c 是某個 d 的最近 cache 祖先才算 μ=1；另提供 `mu_mode="flag"` 對照 | 如左 |
